@@ -16,11 +16,11 @@ The countries chosen were France, Germany, and Poland. The reason behind these c
 
 | Country | Energy Mix Profile | Rationale |
 | :--- | :--- | :--- |
-| France | Stability and low carbon | Will be used to model the renewable-dominated scenario. Strong presence of renewable sources: solar, hydro, wind, and nuclear. Energy mix dominated by nuclear power. |
-| Germany | Transition and volatility | Will be used to model the mixed scenario. During the day, strong presence of intermittent renewable sources (wind and solar). During the night, there is a slight tendency toward fossil fuel burning. |
-| Poland | Fossil-dominated | Will be used to model the non-renewable-dominated scenario (fossil fuel burning). Renewable contribution is small. |
+| France | Stability and low carbon | Will be used to model the green-dominated scenario. Strong presence of green sources: solar, hydro, wind, and nuclear. Energy mix dominated by nuclear power. |
+| Germany | Transition and volatility | Will be used to model the mixed scenario. During the day, considerable presence of intermittent renewable sources (wind and solar). During the night, there is a slight tendency toward fossil fuel burning. |
+| Poland | Fossil-dominated | Will be used to model the fossil-dominated scenario (fossil fuel burning). Green contribution is small. |
 
-The files corresponding to the extracted data for each country are `fossil_heavy_trace.csv` (Poland), `renewable_heavy_trace.csv` (France), and `mixed_trace.csv` (Germany).
+The files corresponding to the extracted data for each country are `fossil_heavy_trace.csv` (Poland), `clean_energy_trace.csv` (France), and `mixed_trace.csv` (Germany).
 
 ## Temporal Scope
 
