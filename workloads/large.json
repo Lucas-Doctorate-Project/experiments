@@ -3630,62 +3630,62 @@
     ],
     "profiles": {
         "p0": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 10000000.0,
             "com": 1000000.0
         },
         "p1": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 10000000.0,
             "com": 10000000.0
         },
         "p2": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 10000000.0,
             "com": 100000000.0
         },
         "p3": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 30000000.0,
             "com": 1000000.0
         },
         "p4": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 30000000.0,
             "com": 10000000.0
         },
         "p5": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 30000000.0,
             "com": 100000000.0
         },
         "p6": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 100000000.0,
             "com": 1000000.0
         },
         "p7": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 100000000.0,
             "com": 10000000.0
         },
         "p8": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 100000000.0,
             "com": 100000000.0
         },
         "p9": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 300000000.0,
             "com": 1000000.0
         },
         "p10": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 300000000.0,
             "com": 10000000.0
         },
         "p11": {
-            "type": "ParallelTaskHomogeneousProfile",
+            "type": "parallel_homogeneous",
             "cpu": 300000000.0,
             "com": 100000000.0
         }
