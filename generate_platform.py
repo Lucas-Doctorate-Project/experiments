@@ -29,6 +29,9 @@ def map_source_to_default_key(source_name):
         return 'coal-default'
     elif 'gas' in source_lower:
         return 'gas-default'
+    elif 'oil' in source_lower:
+        # Map oil to gas as proxy (similar peaking characteristics)
+        return 'gas-default'
     elif 'nuclear' in source_lower:
         return 'nuclear-default'
     elif 'hydro' in source_lower:
@@ -43,8 +46,44 @@ def map_source_to_default_key(source_name):
         return 'biopower-default'
     elif 'geothermal' in source_lower:
         return 'geothermal-default'
+    elif 'waste' in source_lower:
+        # Map waste-to-energy to biopower (similar combustion process)
+        return 'biopower-default'
+    elif 'storage' in source_lower:
+        # Energy storage: use minimal values (storage doesn't produce, just stores)
+        # We'll use solar-pv as a low-emission proxy
+        return 'solar-pv-default'
     else:
         return None
+
+
+def normalize_energy_mix(energy_mix):
+    """
+    Normalize energy mix percentages to sum exactly to 100%.
+
+    Args:
+        energy_mix: Energy mix string (e.g., "Source1:10.5;Source2:89.49")
+
+    Returns:
+        Normalized energy mix string with percentages summing to exactly 100%
+    """
+    parts = []
+    for part in energy_mix.split(';'):
+        if ':' in part:
+            source_name, percentage_str = part.split(':', 1)
+            parts.append((source_name.strip(), float(percentage_str.strip())))
+
+    # Calculate current sum
+    current_sum = sum(pct for _, pct in parts)
+
+    # Normalize to 100%
+    if current_sum > 0 and abs(current_sum - 100.0) > 0.001:
+        normalized_parts = [(source, (pct / current_sum) * 100.0) for source, pct in parts]
+    else:
+        normalized_parts = parts
+
+    # Format back to string with 2 decimal places
+    return ';'.join(f"{source}:{pct:.2f}" for source, pct in normalized_parts)
 
 
 def generate_intensities_from_mix(energy_mix, intensities_data):
@@ -109,6 +148,8 @@ def generate_platform_xml(output_file, energy_mix, carbon_intensity, water_inten
     zone.set('routing', 'Full')
 
     # Create master host
+    # Note: Batsim automatically assigns the 'master' role to the master host,
+    # so we don't need to set it explicitly as a property
     master = ET.SubElement(zone, 'host')
     master.set('id', 'master_host')
     master.set('speed', '100Mf')
@@ -125,6 +166,7 @@ def generate_platform_xml(output_file, energy_mix, carbon_intensity, water_inten
         node.set('speed', '100.0Mf, 1e-9Mf, 0.5f, 0.05f')
         node.set('pstate', '0')
 
+        create_prop(node, 'role', 'compute_node')
         create_prop(node, 'wattage_per_state', '30.0:30.0:100.0, 9.75:9.75:9.75, 200.996721311:200.996721311:200.996721311, 425.1743849:425.1743849:425.1743849')
         create_prop(node, 'wattage_off', '9.75')
         create_prop(node, 'sleep_pstates', '1:2:3')
@@ -168,5 +210,6 @@ if __name__ == "__main__":
 
     for trace in traces:
         energy_mix = read_energy_mix_from_trace(trace['trace_file'])
+        energy_mix = normalize_energy_mix(energy_mix)  # Normalize to exactly 100%
         carbon_intensity, water_intensity = generate_intensities_from_mix(energy_mix, intensities_data)
         generate_platform_xml(trace['output_file'], energy_mix, carbon_intensity, water_intensity, num_nodes=1600)
