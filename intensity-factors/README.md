@@ -1,6 +1,6 @@
 # Energy Intensity Factors
 
-Lookup table of intensity factors for water consumption and carbon emissions from energy generation technologies. The water factors are from Macknick et al. 2012, while carbon factors are from IPCC 2014 and UNECE 2020 reports. The units are gal/MWh (gallons per megawatt-hour) for water and gCO2eq/kWh (grams of CO2 equivalent per kilowatt-hour) for carbon.
+Lookup table of intensity factors for water consumption and carbon emissions from energy generation technologies. The water factors are from Macknick et al. 2012, while carbon factors are from IPCC 2014 and UNECE 2020 reports. The units are L/kWh (liters per kilowatt-hour) for water and gCO2eq/kWh (grams of CO2 equivalent per kilowatt-hour) for carbon. Water values were converted from gallons/MWh to L/kWh.
 
 ## Technology Lookup
 
