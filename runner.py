@@ -53,7 +53,7 @@ def generate_experiment_configs(base_dir: Path) -> List[ExperimentConfig]:
     Generate all experiment configurations.
 
     Creates 72 experiments from Cartesian product of:
-    - 3 workloads × 3 platforms = 9 combinations
+    - 3 workloads × 3 energy scenarios = 9 combinations
     - 2 algorithms per combination
     - 4 queue orderings per algorithm
 
@@ -69,11 +69,14 @@ def generate_experiment_configs(base_dir: Path) -> List[ExperimentConfig]:
         ("mixed", "workloads/mixed.json"),
     ]
 
-    # Platform and energy trace are matched (clean with clean, fossil with fossil, etc.)
-    platforms = [
-        ("clean_energy", "platform/clean_energy_platform.xml", "energy-mix/clean_energy_trace.csv"),
-        ("fossil_heavy", "platform/fossil_heavy_platform.xml", "energy-mix/fossil_heavy_trace.csv"),
-        ("mixed", "platform/mixed_platform.xml", "energy-mix/mixed_trace.csv"),
+    # Single platform for all experiments (Mustang supercomputer model)
+    platform_path = "platform/mustang_platform.xml"
+
+    # Energy scenarios vary independently from the platform
+    energy_scenarios = [
+        ("clean_energy", "energy-mix/clean_energy_trace.csv"),
+        ("fossil_heavy", "energy-mix/fossil_heavy_trace.csv"),
+        ("mixed", "energy-mix/mixed_trace.csv"),
     ]
 
     algorithms = [
@@ -93,16 +96,16 @@ def generate_experiment_configs(base_dir: Path) -> List[ExperimentConfig]:
     exp_id = 1
 
     for workload_name, workload_path in workloads:
-        for platform_name, platform_path, energy_trace_path in platforms:
+        for energy_trace_name, energy_trace_path in energy_scenarios:
             for algorithm, variant_options in algorithms:
                 for queue_order in queue_orders:
                     config = ExperimentConfig(
                         exp_id=exp_id,
                         workload_name=workload_name,
                         workload_path=str(base_dir / workload_path),
-                        platform_name=platform_name,
+                        platform_name="mustang",
                         platform_path=str(base_dir / platform_path),
-                        energy_trace_name=platform_name,  # Matches platform name
+                        energy_trace_name=energy_trace_name,
                         energy_trace_path=str(base_dir / energy_trace_path),
                         algorithm=algorithm,
                         queue_order=queue_order,
