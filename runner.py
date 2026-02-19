@@ -1,6 +1,3 @@
-#!/usr/bin/env nix-shell
-#!nix-shell shell.nix -i python3
-
 """
 Experiment runner for Batsim/Batsched simulations.
 
@@ -27,7 +24,6 @@ class ExperimentConfig:
     exp_id: int
     workload_name: str
     workload_path: str
-    platform_name: str
     platform_path: str
     energy_trace_name: str
     energy_trace_path: str
@@ -103,7 +99,6 @@ def generate_experiment_configs(base_dir: Path) -> List[ExperimentConfig]:
                         exp_id=exp_id,
                         workload_name=workload_name,
                         workload_path=str(base_dir / workload_path),
-                        platform_name="mustang",
                         platform_path=str(base_dir / platform_path),
                         energy_trace_name=energy_trace_name,
                         energy_trace_path=str(base_dir / energy_trace_path),
@@ -222,6 +217,7 @@ def run_experiment(config: ExperimentConfig, timeout: int = 1800) -> ExperimentR
             "batsim",
             "-p", config.platform_path,
             "-w", config.workload_path,
+            "--energy",
             "--environmental-footprint-dynamic", config.energy_trace_path,
             "-e", str(output_dir / "batsim_output"),
             "-s", "tcp://localhost:28000"
@@ -346,7 +342,7 @@ def write_manifest(results: List[ExperimentResult], output_file: Path):
 
         # Write header
         writer.writerow([
-            "id", "workload", "platform", "energy_trace", "algorithm",
+            "id", "workload", "energy_grid", "algorithm",
             "queue_order", "variant_options", "output_dir", "status",
             "start_time", "end_time", "duration_seconds"
         ])
@@ -357,7 +353,6 @@ def write_manifest(results: List[ExperimentResult], output_file: Path):
             writer.writerow([
                 config.exp_id,
                 config.workload_name,
-                config.platform_name,
                 config.energy_trace_name,
                 config.algorithm,
                 config.queue_order,
@@ -380,7 +375,7 @@ def print_progress(current: int, total: int, config: ExperimentConfig):
         config: Current experiment configuration
     """
     print(f"\n[{current}/{total}] Running experiment_{config.exp_id:03d}: "
-          f"{config.workload_name} + {config.platform_name} + {config.algorithm} + {config.queue_order}")
+          f"{config.workload_name} + {config.energy_trace_name} + {config.algorithm} + {config.queue_order}")
     print(f"        Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 
