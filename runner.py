@@ -77,7 +77,7 @@ def generate_experiment_configs(base_dir: Path) -> List[ExperimentConfig]:
 
     algorithms = [
         ("easy_bf", None),
-        ("greenfilling", '{"alpha": 0.3, "query_on_new_jobs": false}'),
+        ("greenfilling", '{"alpha": 0.3}'),
     ]
 
     # Queue ordering strategies
