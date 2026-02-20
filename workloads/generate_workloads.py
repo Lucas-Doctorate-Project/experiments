@@ -3,6 +3,10 @@ generate_workloads.py
 =====================
 Mustang trace  →  three Batsim workload JSON files.
 
+Each job gets its own parallel_homogeneous profile with:
+  cpu = actual_runtime_seconds × FLOPS_PER_NODE
+  com = 0  (network not modelled in the platform)
+
 Usage (from the experiments/ directory, inside the Nix shell):
     python workloads/generate_workloads.py
 
@@ -33,6 +37,7 @@ FILENAME = Path(__file__).parent / "mustang_release_v1.0beta.csv"
 OUT_DIR  = Path(__file__).parent          # workloads/
 CLUSTER_CAPACITY = 1600                   # Mustang node count
 CORES_PER_NODE   = 24
+FLOPS_PER_NODE   = 4.6e9                  # SimGrid platform speed per node (speed="4.6Gf")
 
 # (week_start_date, output_name)
 WEEKS = [
@@ -60,136 +65,6 @@ def compute_duration_sec(
 
 
 # ---------------------------------------------------------------------------
-# Global rank arrays (used for percentile-based profile assignment)
-# ---------------------------------------------------------------------------
-
-def compute_global_rank_arrays(
-    df: pd.DataFrame,
-    *,
-    start_col: str = "start_time",
-    end_col: str = "end_time",
-    wallclock_col: str = "wallclock_limit",
-    nodes_col: str = "node_count",
-    tasks_col: str = "tasks_requested",
-    cores_per_node: int = CORES_PER_NODE,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Return (log_dur_all, log_nodes_all): sorted log-arrays over the full trace,
-    used by assign_profiles_4x3_global_alpha() to compute per-job percentiles.
-
-    effective_nodes = node_count if > 0
-                    else ceil(tasks_requested / cores_per_node)
-    """
-    dur   = compute_duration_sec(df, start_col, end_col, wallclock_col)
-    dur   = dur[(dur.notna()) & (dur > 0)]
-
-    nodes = pd.to_numeric(df[nodes_col], errors="coerce")
-    tasks = (pd.to_numeric(df[tasks_col], errors="coerce")
-             if tasks_col in df.columns
-             else pd.Series(np.nan, index=df.index))
-
-    inferred  = np.ceil(tasks / float(cores_per_node))
-    inferred  = inferred.where(inferred.notna() & (inferred > 0), np.nan)
-    eff_nodes = nodes.where(nodes.notna() & (nodes > 0), inferred)
-
-    valid = dur.index.intersection(eff_nodes.index)
-    dur2, eff2 = dur.loc[valid], eff_nodes.loc[valid]
-    mask = dur2.notna() & (dur2 > 0) & eff2.notna() & (eff2 > 0)
-    dur2, eff2 = dur2[mask], eff2[mask]
-
-    if len(dur2) == 0:
-        raise ValueError("No valid duration rows in trace.")
-    if len(eff2) == 0:
-        raise ValueError("No valid node-count rows in trace.")
-
-    return np.sort(np.log(dur2.to_numpy())), np.sort(np.log(eff2.to_numpy()))
-
-
-# ---------------------------------------------------------------------------
-# Profile catalogue
-# ---------------------------------------------------------------------------
-
-def build_profiles_12(
-    cpu_levels: list | None = None,
-    com_levels: list | None = None,
-) -> dict:
-    """12 parallel_homogeneous profiles: 4 CPU tiers × 3 COM tiers → p0..p11."""
-    if cpu_levels is None: cpu_levels = [1e7, 3e7, 1e8, 3e8]
-    if com_levels is None: com_levels = [1e6, 1e7, 1e8]
-    profiles, k = {}, 0
-    for c in cpu_levels:
-        for m in com_levels:
-            profiles[f"p{k}"] = {
-                "type": "parallel_homogeneous",
-                "cpu":  float(c),
-                "com":  float(m),
-            }
-            k += 1
-    return profiles
-
-
-# ---------------------------------------------------------------------------
-# Profile assignment
-# ---------------------------------------------------------------------------
-
-def assign_profiles_4x3_global_alpha(
-    jobs: pd.DataFrame,
-    *,
-    log_dur_all: np.ndarray,
-    log_nodes_all: np.ndarray,
-    rng: np.random.Generator | None = None,
-    start_col: str = "start_time",
-    end_col: str = "end_time",
-    wallclock_col: str = "wallclock_limit",
-    nodes_col: str = "node_count",
-    alpha_cpu: float = 0.75,
-    alpha_com: float = 0.85,
-    jitter_prob: float = 0.0,
-) -> tuple[pd.Series, np.ndarray, np.ndarray]:
-    """
-    Assign a profile p0..p11 to each job via global percentile mixing:
-      cpu_score = alpha_cpu * dur_pct  + (1 - alpha_cpu) * node_pct  → CPU tier 0..3
-      com_score = alpha_com * node_pct + (1 - alpha_com) * dur_pct   → COM tier 0..2
-
-    Returns (profile_series, cpu_tier_array, com_tier_array).
-    """
-    x = jobs.copy()
-
-    duration_sec = compute_duration_sec(x, start_col, end_col, wallclock_col)
-    dur_fallback = duration_sec[(duration_sec.notna()) & (duration_sec > 0)].median()
-    if pd.isna(dur_fallback): dur_fallback = 3600.0
-    duration_sec = duration_sec.fillna(dur_fallback).clip(lower=1.0)
-
-    nodes = pd.to_numeric(x[nodes_col], errors="coerce")
-    node_fallback = nodes[(nodes.notna()) & (nodes > 0)].median()
-    if pd.isna(node_fallback): node_fallback = 1.0
-    nodes = nodes.fillna(node_fallback).clip(lower=1.0)
-
-    log_dur  = np.log(duration_sec.to_numpy())
-    log_node = np.log(nodes.to_numpy())
-
-    dur_pct  = np.searchsorted(log_dur_all,   log_dur,  side="right") / len(log_dur_all)
-    lo = np.searchsorted(log_nodes_all, log_node, side="left")
-    hi = np.searchsorted(log_nodes_all, log_node, side="right")
-    node_pct = (lo + hi) / 2 / len(log_nodes_all)
-
-    cpu_score = alpha_cpu * dur_pct  + (1.0 - alpha_cpu) * node_pct
-    com_score = alpha_com * node_pct + (1.0 - alpha_com) * dur_pct
-
-    cpu_tier = np.minimum(3, (cpu_score * 4).astype(int))
-    com_tier = np.minimum(2, (com_score * 3).astype(int))
-
-    if rng is not None and len(x) > 0 and jitter_prob > 0:
-        jmask    = rng.random(len(x)) < jitter_prob
-        cpu_tier = np.clip(cpu_tier + jmask * rng.integers(-1, 2, size=len(x)), 0, 3)
-        com_tier = np.clip(com_tier + jmask * rng.integers(-1, 2, size=len(x)), 0, 2)
-
-    idx     = (cpu_tier * 3 + com_tier).astype(int)
-    profile = pd.Series([f"p{i}" for i in idx], index=x.index, name="profile")
-    return profile, cpu_tier, com_tier
-
-
-# ---------------------------------------------------------------------------
 # Walltime parsing
 # ---------------------------------------------------------------------------
 
@@ -206,30 +81,6 @@ def _parse_walltime_seconds(s: pd.Series) -> pd.Series:
 
 
 # ---------------------------------------------------------------------------
-# Event-delta helper (node occupancy)
-# ---------------------------------------------------------------------------
-
-def _build_events_delta(
-    df: pd.DataFrame,
-    start_col: str = "start_time",
-    end_col: str = "end_time",
-    size_col: str = "node_count",
-) -> pd.Series:
-    """
-    Step-function of cluster occupancy as a delta series:
-      +node_count at start_time, -node_count at end_time.
-    cumsum() gives instantaneous occupancy.
-    """
-    tmp = df[[start_col, end_col, size_col]].dropna().copy()
-    tmp[size_col] = pd.to_numeric(tmp[size_col], errors="coerce")
-    tmp = tmp.dropna(subset=[size_col])
-    tmp = tmp[(tmp[size_col] > 0) & (tmp[end_col] >= tmp[start_col])]
-    starts = tmp.groupby(start_col)[size_col].sum()
-    ends   = -tmp.groupby(end_col)[size_col].sum()
-    return pd.concat([starts, ends]).groupby(level=0).sum().sort_index()
-
-
-# ---------------------------------------------------------------------------
 # Warm-up context extraction
 # ---------------------------------------------------------------------------
 
@@ -237,21 +88,17 @@ def extract_running_context(
     df: pd.DataFrame,
     week_start: pd.Timestamp,
     *,
-    log_dur_all: np.ndarray,
-    log_nodes_all: np.ndarray,
-    rng: np.random.Generator,
     submit_col: str = "submit_time",
     start_col: str = "start_time",
     end_col: str = "end_time",
     nodes_col: str = "node_count",
-    wallclock_col: str = "wallclock_limit",
-    alpha_cpu: float = 0.70,
-    alpha_com: float = 0.85,
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     """
     Jobs running at week_start (start < T0 <= end) become Batsim "ctx" jobs:
       subtime = 0, walltime = remaining seconds until actual end.
-    Profiles are assigned with the same alpha-mixing as regular jobs.
+    Each gets its own profile: cpu = remaining_sec × FLOPS_PER_NODE, com = 0.
+
+    Returns (ctx_jobs_list, ctx_profiles_dict).
     """
     d = df.copy()
     for c in [start_col, end_col, submit_col]:
@@ -265,7 +112,7 @@ def extract_running_context(
 
     if running.empty:
         print(f"  [context] no running jobs at {week_start.date()}")
-        return []
+        return [], {}
 
     running["_remaining_sec"] = (
         d.loc[mask, end_col] - week_start
@@ -276,40 +123,27 @@ def extract_running_context(
           .fillna(1).clip(lower=1).astype(int)
     )
 
-    # Build a synthetic frame so assign_profiles can compute duration from timestamps
-    tmp = running.copy()
-    tmp[wallclock_col] = pd.to_timedelta(running["_remaining_sec"], unit="s")
-    tmp[start_col]     = week_start - pd.to_timedelta(running["_remaining_sec"], unit="s")
-    tmp[end_col]       = week_start + pd.to_timedelta(running["_remaining_sec"], unit="s")
-
-    profiles_assigned, _, _ = assign_profiles_4x3_global_alpha(
-        tmp,
-        log_dur_all=log_dur_all,
-        log_nodes_all=log_nodes_all,
-        rng=rng,
-        start_col=start_col,
-        end_col=end_col,
-        wallclock_col=wallclock_col,
-        nodes_col=nodes_col,
-        alpha_cpu=alpha_cpu,
-        alpha_com=alpha_com,
-        jitter_prob=0.0,    # no jitter for context jobs
-    )
-
-    ctx_jobs = [
-        {
-            "id":      f"ctx{i}",
+    ctx_jobs: list[dict] = []
+    ctx_profiles: dict = {}
+    for i, (idx, row) in enumerate(running.iterrows(), start=1):
+        prof_name = f"ctx{i}"
+        remaining = float(row["_remaining_sec"])
+        ctx_profiles[prof_name] = {
+            "type": "parallel_homogeneous",
+            "cpu":  remaining * FLOPS_PER_NODE,
+            "com":  0.0,
+        }
+        ctx_jobs.append({
+            "id":      prof_name,
             "subtime": 0.0,
             "res":     int(row[nodes_col]),
-            "profile": profiles_assigned.loc[idx],
-            "walltime": int(round(row["_remaining_sec"])),
-        }
-        for i, (idx, row) in enumerate(running.iterrows(), start=1)
-    ]
+            "profile": prof_name,
+            "walltime": int(round(remaining)),
+        })
 
     print(f"  [context] {len(ctx_jobs)} jobs at {week_start.date()} "
           f"({sum(j['res'] for j in ctx_jobs)} nodes occupied)")
-    return ctx_jobs
+    return ctx_jobs, ctx_profiles
 
 
 # ---------------------------------------------------------------------------
@@ -328,18 +162,13 @@ def make_batsim_workload_json(
     tasks_col: str = "tasks_requested",
     start_col: str = "start_time",
     end_col: str = "end_time",
-    rng: np.random.Generator,
-    log_dur_all: np.ndarray,
-    log_nodes_all: np.ndarray,
-    alpha_cpu: float = 0.70,
-    alpha_com: float = 0.85,
-    jitter_prob: float = 0.25,
     cores_per_node: int = CORES_PER_NODE,
-    print_grid: bool = True,
     context_jobs: list | None = None,
+    context_profiles: dict | None = None,
 ) -> dict:
     """
     Build the Batsim workload dict for one week.
+    Each regular job gets its own profile: cpu = actual_runtime × FLOPS_PER_NODE, com = 0.
     context_jobs (warm-up) are prepended before regular jobs with subtime=0.
     """
     rows = week_rows.copy()
@@ -367,51 +196,37 @@ def make_batsim_workload_json(
           .fillna(node_fallback).clip(lower=1).astype(int)
     )
 
-    profiles = build_profiles_12()
-
-    tmp = rows.copy()
-    tmp[nodes_col] = rows["_nodes_eff"]
-    rows["profile"], cpu_tier, com_tier = assign_profiles_4x3_global_alpha(
-        tmp,
-        log_dur_all=log_dur_all,
-        log_nodes_all=log_nodes_all,
-        rng=rng,
-        start_col=start_col,
-        end_col=end_col,
-        wallclock_col=wallclock_col,
-        nodes_col=nodes_col,
-        alpha_cpu=alpha_cpu,
-        alpha_com=alpha_com,
-        jitter_prob=jitter_prob,
-    )
-
-    if print_grid:
-        counts = np.zeros((4, 3), dtype=int)
-        for ct, mt in zip(cpu_tier, com_tier):
-            counts[int(ct), int(mt)] += 1
-        total = counts.sum()
-        pct   = counts / total * 100 if total > 0 else np.zeros_like(counts, dtype=float)
-        print("  [profile grid %]  rows=CPU 0..3  cols=COM 0..2")
-        for r in range(4):
-            print("  CPU%d: %s" % (r, "  ".join(f"{pct[r,c]:6.2f}%" for c in range(3))))
+    rows["_runtime_sec"] = compute_duration_sec(
+        rows, start_col=start_col, end_col=end_col, wallclock_col=wallclock_col,
+    ).clip(lower=1.0)
 
     nb_res = int(cluster_capacity) if cluster_capacity is not None \
              else (int(max(1, rows["_nodes_eff"].max())) if len(rows) else 1)
 
     jobs: list[dict] = []
-    for i, (submit_time, nodes_eff, profile, walltime_sec) in enumerate(
-        rows[[submit_col, "_nodes_eff", "profile", "walltime_sec"]]
+    profiles: dict = dict(context_profiles or {})
+
+    for i, row in enumerate(
+        rows[[submit_col, "_nodes_eff", "walltime_sec", "_runtime_sec"]]
             .itertuples(index=False, name=None),
         start=1,
     ):
+        submit_time, nodes_eff, walltime_sec, runtime_sec = row
         subtime = (pd.Timestamp(submit_time) - week_start).total_seconds()
         if subtime < 0 or pd.Timestamp(submit_time) >= week_end:
             continue
+
+        prof_name = f"job{i}"
+        profiles[prof_name] = {
+            "type": "parallel_homogeneous",
+            "cpu":  float(runtime_sec) * FLOPS_PER_NODE,
+            "com":  0.0,
+        }
         job: dict = {
-            "id":      f"job{i}",
+            "id":      prof_name,
             "subtime": float(subtime),
             "res":     int(nodes_eff),
-            "profile": str(profile),
+            "profile": prof_name,
         }
         if walltime_sec is not None and not (isinstance(walltime_sec, float) and np.isnan(walltime_sec)):
             wt = float(walltime_sec)
@@ -435,7 +250,6 @@ def export_weeks(
     out_dir: Union[str, Path],
     cluster_capacity: Optional[float] = None,
     week_days: int = 7,
-    random_seed: int = 42,
     submit_col: str = "submit_time",
     start_col: str = "start_time",
     end_col: str = "end_time",
@@ -450,16 +264,6 @@ def export_weeks(
         df[c] = pd.to_datetime(df[c], errors="coerce", utc=True)
     submit_tz = df[submit_col].dt.tz
 
-    rng = np.random.default_rng(random_seed)
-    log_dur_all, log_nodes_all = compute_global_rank_arrays(
-        df,
-        start_col=start_col,
-        end_col=end_col,
-        wallclock_col=wallclock_col,
-        nodes_col=nodes_col,
-        tasks_col=tasks_col,
-    )
-
     for date_str, output_name in weeks:
         week_start = pd.to_datetime(date_str)
         if submit_tz is not None and week_start.tzinfo is None:
@@ -473,11 +277,10 @@ def export_weeks(
         week_dir.mkdir(parents=True, exist_ok=True)
 
         # Warm-up context: jobs already running at T0
-        ctx_jobs = extract_running_context(
+        ctx_jobs, ctx_profiles = extract_running_context(
             df, week_start,
-            log_dur_all=log_dur_all, log_nodes_all=log_nodes_all, rng=rng,
             submit_col=submit_col, start_col=start_col, end_col=end_col,
-            nodes_col=nodes_col, wallclock_col=wallclock_col,
+            nodes_col=nodes_col,
         )
 
         # Jobs submitted during the week
@@ -491,9 +294,7 @@ def export_weeks(
             week_rows, week_start, week_end, cluster_capacity,
             submit_col=submit_col, nodes_col=nodes_col, wallclock_col=wallclock_col,
             tasks_col=tasks_col, start_col=start_col, end_col=end_col,
-            rng=rng, log_dur_all=log_dur_all, log_nodes_all=log_nodes_all,
-            alpha_cpu=0.70, alpha_com=0.85, jitter_prob=0.25, print_grid=True,
-            context_jobs=ctx_jobs,
+            context_jobs=ctx_jobs, context_profiles=ctx_profiles,
         )
 
         dated_json = week_dir / "workload_batsim.json"
@@ -508,6 +309,7 @@ def export_weeks(
         ctx_nodes = sum(j["res"] for j in batsim_obj["jobs"] if j["id"].startswith("ctx"))
         print(f"  wrote {named_json.name}: "
               f"{n_ctx} ctx jobs ({ctx_nodes} nodes at T0) + {n_jobs} regular jobs")
+        print(f"  total profiles: {len(batsim_obj['profiles'])}")
 
 
 # ---------------------------------------------------------------------------
