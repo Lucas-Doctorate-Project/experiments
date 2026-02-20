@@ -387,7 +387,7 @@ def check_results_directory(results_dir: Path) -> str:
         results_dir: Path to results directory
 
     Returns:
-        Action to take: "create", "delete", or "cancel"
+        Action to take: "create", "delete", "cancel", or "resume"
     """
     if not results_dir.exists():
         results_dir.mkdir(parents=True)
@@ -398,19 +398,64 @@ def check_results_directory(results_dir: Path) -> str:
         return "create"
 
     # Directory has contents, prompt user
+    csv_path = results_dir / "experiments.csv"
+    can_resume = csv_path.exists() and csv_path.stat().st_size > 0
+
     print(f"\nResults directory already exists: {results_dir}")
     print("Options:")
+    if can_resume:
+        print("  [r] Resume from last experiment (redoes it for safety)")
     print("  [d] Delete existing results and start fresh")
     print("  [c] Cancel execution")
 
+    prompt = "[r/d/c]" if can_resume else "[d/c]"
+
     while True:
-        choice = input("Choose an option [d/c]: ").strip().lower()
-        if choice == "d":
+        choice = input(f"Choose an option {prompt}: ").strip().lower()
+        if choice == "r" and can_resume:
+            return "resume"
+        elif choice == "d":
             return "delete"
         elif choice == "c":
             return "cancel"
         else:
-            print("Invalid choice. Please enter 'd' or 'c'.")
+            valid = "'r', 'd', or 'c'" if can_resume else "'d' or 'c'"
+            print(f"Invalid choice. Please enter {valid}.")
+
+
+def load_existing_results(
+    results_dir: Path, configs: List[ExperimentConfig]
+) -> Tuple[List[ExperimentResult], int]:
+    """
+    Load completed results from experiments.csv, excluding the last row.
+
+    Args:
+        results_dir: Path to results directory containing experiments.csv
+        configs: Full list of experiment configurations
+
+    Returns:
+        (results, resume_idx) where results are all completed experiments except
+        the last, and resume_idx is the 0-based index in configs of the last row
+        (which will be redone for safety).
+    """
+    rows = list(csv.DictReader(open(results_dir / "experiments.csv")))
+    if not rows:
+        return [], 0
+    resume_idx = int(rows[-1]["id"]) - 1
+    configs_by_id = {c.exp_id: c for c in configs}
+    results = []
+    for row in rows[:-1]:
+        config = configs_by_id.get(int(row["id"]))
+        if config is None:
+            continue
+        results.append(ExperimentResult(
+            config=config,
+            status=row["status"],
+            start_time=datetime.fromisoformat(row["start_time"]),
+            end_time=datetime.fromisoformat(row["end_time"]),
+            duration_seconds=float(row["duration_seconds"]),
+        ))
+    return results, resume_idx
 
 
 def print_summary(results: List[ExperimentResult]):
@@ -497,8 +542,18 @@ def main():
     print("=" * 80)
 
     results = []
+    start_idx = 0
+    if action == "resume":
+        results, start_idx = load_existing_results(results_dir, configs)
+        redo_output_dir = Path(configs[start_idx].output_dir)
+        if redo_output_dir.exists():
+            shutil.rmtree(redo_output_dir)
+        print(f"\nResuming from experiment_{configs[start_idx].exp_id:03d} "
+              f"(redoing last for safety, {len(results)} previous results kept).")
+        if results:
+            write_manifest(results, results_dir / "experiments.csv")
 
-    for i, config in enumerate(configs, 1):
+    for i, config in enumerate(configs[start_idx:], len(results) + 1):
         print_progress(i, len(configs), config)
 
         result = run_experiment(config, timeout=1800)
