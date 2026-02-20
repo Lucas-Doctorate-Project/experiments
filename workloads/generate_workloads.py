@@ -15,14 +15,12 @@ Outputs:
     workloads/large.json   (week 2012-02-07, mostly large jobs)
     workloads/mixed.json   (week 2012-12-13, mixed job sizes)
 
-Each JSON also lands in workloads/<YYYY-MM-DD>/workload_batsim.json alongside
-a week_fraction.csv with the raw rows.
+Each week's raw rows are saved to workloads/<YYYY-MM-DD>/week_fraction.csv.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 from typing import Optional, Sequence, Union
 
@@ -297,12 +295,9 @@ def export_weeks(
             context_jobs=ctx_jobs, context_profiles=ctx_profiles,
         )
 
-        dated_json = week_dir / "workload_batsim.json"
-        with open(dated_json, "w", encoding="utf-8") as f:
-            json.dump(batsim_obj, f, indent=4)
-
         named_json = out_dir / output_name
-        shutil.copy(dated_json, named_json)
+        with open(named_json, "w", encoding="utf-8") as f:
+            json.dump(batsim_obj, f, indent=4)
 
         n_ctx  = sum(1 for j in batsim_obj["jobs"] if j["id"].startswith("ctx"))
         n_jobs = sum(1 for j in batsim_obj["jobs"] if j["id"].startswith("job"))
