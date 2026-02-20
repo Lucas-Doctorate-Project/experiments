@@ -12,10 +12,14 @@ import time
 import csv
 import shutil
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Tuple
+
+MAX_WORKERS = 6
 
 
 @dataclass
@@ -31,6 +35,7 @@ class ExperimentConfig:
     queue_order: str
     variant_options: Optional[str]
     output_dir: str
+    port: int
 
 
 @dataclass
@@ -106,6 +111,7 @@ def generate_experiment_configs(base_dir: Path) -> List[ExperimentConfig]:
                         queue_order=queue_order,
                         variant_options=variant_options,
                         output_dir=str(base_dir / "results" / f"experiment_{exp_id:03d}"),
+                        port=28000 + exp_id,
                     )
                     configs.append(config)
                     exp_id += 1
@@ -220,7 +226,7 @@ def run_experiment(config: ExperimentConfig, timeout: int = 1800) -> ExperimentR
             "--energy",
             "--environmental-footprint-dynamic", config.energy_trace_path,
             "-e", str(output_dir / "batsim_output"),
-            "-s", "tcp://localhost:28000"
+            "-s", f"tcp://localhost:{config.port}"
         ]
 
         # Start Batsim (ZMQ server)
@@ -253,7 +259,7 @@ def run_experiment(config: ExperimentConfig, timeout: int = 1800) -> ExperimentR
             "batsched",
             "-v", config.algorithm,
             "-o", config.queue_order,
-            "-s", "tcp://localhost:28000"
+            "-s", f"tcp://localhost:{config.port}"
         ]
 
         # Add variant options for greenfilling
@@ -365,20 +371,6 @@ def write_manifest(results: List[ExperimentResult], output_file: Path):
             ])
 
 
-def print_progress(current: int, total: int, config: ExperimentConfig):
-    """
-    Print experiment progress information.
-
-    Args:
-        current: Current experiment number (1-indexed)
-        total: Total number of experiments
-        config: Current experiment configuration
-    """
-    print(f"\n[{current}/{total}] Running experiment_{config.exp_id:03d}: "
-          f"{config.workload_name} + {config.energy_trace_name} + {config.algorithm} + {config.queue_order}")
-    print(f"        Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-
 def check_results_directory(results_dir: Path) -> str:
     """
     Check if results directory exists and prompt user for action.
@@ -404,7 +396,7 @@ def check_results_directory(results_dir: Path) -> str:
     print(f"\nResults directory already exists: {results_dir}")
     print("Options:")
     if can_resume:
-        print("  [r] Resume from last experiment (redoes it for safety)")
+        print(f"  [r] Resume from last experiment (redoes last {MAX_WORKERS} for safety)")
     print("  [d] Delete existing results and start fresh")
     print("  [c] Cancel execution")
 
@@ -424,27 +416,28 @@ def check_results_directory(results_dir: Path) -> str:
 
 
 def load_existing_results(
-    results_dir: Path, configs: List[ExperimentConfig]
+    results_dir: Path, configs: List[ExperimentConfig], n_redo: int
 ) -> Tuple[List[ExperimentResult], int]:
     """
-    Load completed results from experiments.csv, excluding the last row.
+    Load completed results from experiments.csv, dropping the last n_redo rows.
 
     Args:
         results_dir: Path to results directory containing experiments.csv
         configs: Full list of experiment configurations
+        n_redo: Number of trailing rows to drop (re-run for safety)
 
     Returns:
-        (results, resume_idx) where results are all completed experiments except
-        the last, and resume_idx is the 0-based index in configs of the last row
-        (which will be redone for safety).
+        (results, resume_idx) where results are all kept experiments and
+        resume_idx is the exp_id of the last kept row (configs start after it).
     """
     rows = list(csv.DictReader(open(results_dir / "experiments.csv")))
     if not rows:
         return [], 0
-    resume_idx = int(rows[-1]["id"]) - 1
+    keep = rows[:max(0, len(rows) - n_redo)]
+    resume_idx = int(keep[-1]["id"]) if keep else 0
     configs_by_id = {c.exp_id: c for c in configs}
     results = []
-    for row in rows[:-1]:
+    for row in keep:
         config = configs_by_id.get(int(row["id"]))
         if config is None:
             continue
@@ -536,45 +529,72 @@ def main():
 
     print("All input files validated.")
 
-    # Run experiments sequentially
+    # Run experiments in parallel
     print("\n" + "=" * 80)
-    print("STARTING EXPERIMENTS")
+    print(f"STARTING EXPERIMENTS (up to {MAX_WORKERS} in parallel)")
     print("=" * 80)
 
-    results = []
+    all_results = []
     start_idx = 0
     if action == "resume":
-        results, start_idx = load_existing_results(results_dir, configs)
-        redo_output_dir = Path(configs[start_idx].output_dir)
-        if redo_output_dir.exists():
-            shutil.rmtree(redo_output_dir)
+        all_results, start_idx = load_existing_results(results_dir, configs, MAX_WORKERS)
+        for config in configs[start_idx:start_idx + MAX_WORKERS]:
+            redo_dir = Path(config.output_dir)
+            if redo_dir.exists():
+                shutil.rmtree(redo_dir)
+        n_kept = len(all_results)
         print(f"\nResuming from experiment_{configs[start_idx].exp_id:03d} "
-              f"(redoing last for safety, {len(results)} previous results kept).")
-        if results:
-            write_manifest(results, results_dir / "experiments.csv")
+              f"(redoing last {MAX_WORKERS} for safety, {n_kept} previous results kept).")
+        if all_results:
+            write_manifest(all_results, results_dir / "experiments.csv")
 
-    for i, config in enumerate(configs[start_idx:], len(results) + 1):
-        print_progress(i, len(configs), config)
+    shutdown_event = threading.Event()
+    manifest_lock = threading.Lock()
+    total = len(configs)
+    pending = configs[start_idx:]
 
+    def run_and_record(config: ExperimentConfig) -> Optional[ExperimentResult]:
+        if shutdown_event.is_set():
+            return None
+        print(f"  → experiment_{config.exp_id:03d}: "
+              f"{config.workload_name} + {config.energy_trace_name} + "
+              f"{config.algorithm} + {config.queue_order}")
         result = run_experiment(config, timeout=1800)
-        results.append(result)
+        with manifest_lock:
+            all_results.append(result)
+            all_results.sort(key=lambda r: r.config.exp_id)
+            count = len(all_results)
+            write_manifest(all_results, results_dir / "experiments.csv")
+        symbol = "✓" if result.status == "success" else "✗"
+        print(f"  {symbol} [{count}/{total}] experiment_{config.exp_id:03d}: "
+              f"{result.status} ({result.duration_seconds:.1f}s)")
+        return result
 
-        # Print result
-        if result.status == "success":
-            print(f"        ✓ Completed successfully in {result.duration_seconds:.1f}s")
-        elif result.status == "timeout":
-            print(f"        ✗ TIMEOUT after {result.duration_seconds:.1f}s")
-        else:
-            print(f"        ✗ FAILED: {result.error_message}")
-
-        # Write updated manifest after each experiment
-        write_manifest(results, results_dir / "experiments.csv")
+    executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+    interrupted = False
+    try:
+        futures = {executor.submit(run_and_record, c): c for c in pending}
+        for future in as_completed(futures):
+            future.result()
+    except KeyboardInterrupt:
+        interrupted = True
+        print("\n\nInterrupted. Cancelling pending experiments...")
+        shutdown_event.set()
+        for f in futures:
+            f.cancel()
+        print("Waiting for in-flight experiments to finish...")
+    finally:
+        executor.shutdown(wait=True)
 
     # Print summary
-    print_summary(results)
+    print_summary(all_results)
 
     print(f"\nManifest written to: {results_dir / 'experiments.csv'}")
-    print("\nAll experiments completed!")
+    if interrupted:
+        print("\nExecution interrupted by user.")
+        sys.exit(1)
+    else:
+        print("\nAll experiments completed!")
 
 
 if __name__ == "__main__":
