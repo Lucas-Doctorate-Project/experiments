@@ -7,6 +7,8 @@ This script automates running experiments that test different combinations of:
 - Scheduling algorithms (easy_bf baseline, greenfilling)
 """
 
+import argparse
+import json
 import subprocess
 import time
 import csv
@@ -49,48 +51,78 @@ class ExperimentResult:
     error_message: Optional[str] = None
 
 
-def generate_experiment_configs(base_dir: Path) -> List[ExperimentConfig]:
-    """
-    Generate all experiment configurations.
+WORKLOAD_PATHS = {
+    "small": "workloads/small.json",
+    "large": "workloads/large.json",
+    "mixed": "workloads/mixed.json",
+}
 
-    Creates 72 experiments from Cartesian product of:
-    - 3 workloads × 3 energy scenarios = 9 combinations
-    - 2 algorithms per combination
-    - 4 queue orderings per algorithm
+ENERGY_PATHS = {
+    "clean_energy": "energy-mix/clean_energy_trace.csv",
+    "fossil_heavy": "energy-mix/fossil_heavy_trace.csv",
+    "mixed": "energy-mix/mixed_trace.csv",
+}
+
+PLATFORM_PATH = "platform/mustang_platform.xml"
+
+# Default design — kept in sync with configs/full.json
+DEFAULT_CONFIG = {
+    "workloads": ["small", "large", "mixed"],
+    "energy_scenarios": ["clean_energy", "fossil_heavy", "mixed"],
+    "algorithms": [
+        {
+            "name": "easy_bf",
+            "queue_orders": ["fcfs", "asc_estimated_area", "asc_f1", "frontier"],
+        },
+        {
+            "name": "greenfilling",
+            "queue_orders": ["fcfs", "asc_estimated_area", "asc_f1", "frontier"],
+            "alphas": [0.3],
+        },
+    ],
+}
+
+
+def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, results_dir: Path = None) -> List[ExperimentConfig]:
+    """
+    Generate experiment configurations from a config dict.
+
+    The config dict has the form::
+
+        {
+            "workloads": ["small", "large", "mixed"],
+            "energy_scenarios": ["clean_energy", "fossil_heavy", "mixed"],
+            "algorithms": [
+                {"name": "easy_bf", "queue_orders": ["fcfs"]},
+                {"name": "greenfilling", "queue_orders": ["fcfs"], "alphas": [0.3, 0.5, 0.8]}
+            ]
+        }
+
+    Each entry in ``algorithms`` generates one experiment per
+    (workload × energy_scenario × queue_order × alpha).  ``easy_bf`` has no
+    ``alphas`` key (it ignores energy entirely).
+
+    If ``experiment_config`` is None the DEFAULT_CONFIG is used, which
+    reproduces the original 72-experiment full-factorial design.
 
     Args:
         base_dir: Base directory containing workloads, platforms, and energy traces
+        experiment_config: Config dict, or None to use DEFAULT_CONFIG
 
     Returns:
-        List of 72 ExperimentConfig objects
+        List of ExperimentConfig objects
     """
+    cfg = experiment_config if experiment_config is not None else DEFAULT_CONFIG
+    if results_dir is None:
+        results_dir = base_dir / "results"
+
     workloads = [
-        ("small", "workloads/small.json"),
-        ("large", "workloads/large.json"),
-        ("mixed", "workloads/mixed.json"),
+        (name, WORKLOAD_PATHS[name])
+        for name in cfg.get("workloads", list(WORKLOAD_PATHS))
     ]
-
-    # Single platform for all experiments (Mustang supercomputer model)
-    platform_path = "platform/mustang_platform.xml"
-
-    # Energy scenarios vary independently from the platform
     energy_scenarios = [
-        ("clean_energy", "energy-mix/clean_energy_trace.csv"),
-        ("fossil_heavy", "energy-mix/fossil_heavy_trace.csv"),
-        ("mixed", "energy-mix/mixed_trace.csv"),
-    ]
-
-    algorithms = [
-        ("easy_bf", None),
-        ("greenfilling", '{"alpha": 0.3}'),
-    ]
-
-    # Queue ordering strategies
-    queue_orders = [
-        "fcfs",                 # First Come First Served
-        "asc_estimated_area",   # Shortest Area First (SAF)
-        "asc_f1",               # F1 scoring
-        "frontier",             # Frontier scheduling
+        (name, ENERGY_PATHS[name])
+        for name in cfg.get("energy_scenarios", list(ENERGY_PATHS))
     ]
 
     configs = []
@@ -98,23 +130,35 @@ def generate_experiment_configs(base_dir: Path) -> List[ExperimentConfig]:
 
     for workload_name, workload_path in workloads:
         for energy_trace_name, energy_trace_path in energy_scenarios:
-            for algorithm, variant_options in algorithms:
+            for alg in cfg.get("algorithms", DEFAULT_CONFIG["algorithms"]):
+                alg_name = alg["name"]
+                queue_orders = alg.get("queue_orders", ["fcfs"])
+
+                # Build the list of variant_options strings for this algorithm.
+                # easy_bf has no alphas; greenfilling defaults to [0.3].
+                if alg_name == "easy_bf":
+                    variants = [None]
+                else:
+                    alphas = alg.get("alphas", [0.3])
+                    variants = [json.dumps({"alpha": a}) for a in alphas]
+
                 for queue_order in queue_orders:
-                    config = ExperimentConfig(
-                        exp_id=exp_id,
-                        workload_name=workload_name,
-                        workload_path=str(base_dir / workload_path),
-                        platform_path=str(base_dir / platform_path),
-                        energy_trace_name=energy_trace_name,
-                        energy_trace_path=str(base_dir / energy_trace_path),
-                        algorithm=algorithm,
-                        queue_order=queue_order,
-                        variant_options=variant_options,
-                        output_dir=str(base_dir / "results" / f"experiment_{exp_id:03d}"),
-                        port=28000 + exp_id,
-                    )
-                    configs.append(config)
-                    exp_id += 1
+                    for variant_options in variants:
+                        config = ExperimentConfig(
+                            exp_id=exp_id,
+                            workload_name=workload_name,
+                            workload_path=str(base_dir / workload_path),
+                            platform_path=str(base_dir / PLATFORM_PATH),
+                            energy_trace_name=energy_trace_name,
+                            energy_trace_path=str(base_dir / energy_trace_path),
+                            algorithm=alg_name,
+                            queue_order=queue_order,
+                            variant_options=variant_options,
+                            output_dir=str(results_dir / f"experiment_{exp_id:03d}"),
+                            port=28000 + exp_id,
+                        )
+                        configs.append(config)
+                        exp_id += 1
 
     return configs
 
@@ -488,15 +532,52 @@ def print_summary(results: List[ExperimentResult]):
 def main():
     """Main experiment runner execution."""
 
+    parser = argparse.ArgumentParser(
+        description="Run Batsim/Batsched experiments.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Without --config the full 72-experiment factorial design is used.\n"
+            "See configs/ for example configuration files."
+        ),
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="Path to a JSON experiment config file (default: full factorial design)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Directory to write results into (default: experiments/results)",
+    )
+    args = parser.parse_args()
+
+    # Load experiment config
+    experiment_config = None
+    if args.config is not None:
+        if not args.config.exists():
+            print(f"ERROR: Config file not found: {args.config}", file=sys.stderr)
+            sys.exit(1)
+        with open(args.config) as f:
+            experiment_config = json.load(f)
+
     # Setup
     base_dir = Path(__file__).parent.resolve()
-    results_dir = base_dir / "results"
+    results_dir = args.output_dir.resolve() if args.output_dir else base_dir / "results"
 
     print("=" * 80)
     print("BATSIM/BATSCHED EXPERIMENT RUNNER")
     print("=" * 80)
     print(f"Base directory: {base_dir}")
     print(f"Results directory: {results_dir}")
+    if args.config:
+        print(f"Config file: {args.config.resolve()}")
+    else:
+        print("Config file: (default full factorial design)")
 
     # Check and prepare results directory
     action = check_results_directory(results_dir)
@@ -510,7 +591,7 @@ def main():
 
     # Generate experiment configurations
     print("\nGenerating experiment configurations...")
-    configs = generate_experiment_configs(base_dir)
+    configs = generate_experiment_configs(base_dir, experiment_config, results_dir)
     print(f"Generated {len(configs)} experiment configurations.")
 
     # Validate input files exist
