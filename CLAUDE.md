@@ -51,6 +51,11 @@ python runner.py --run-name 20260224_103000_full
 
 Each run creates a new subdirectory under `outputs/` (gitignored). If the target directory already has content, the runner will ask whether to resume, delete and restart, or cancel.
 
+## Git conventions
+
+- Keep commit messages concise and imperative.
+- Do **not** mention Claude or add `Co-Authored-By` trailers in commit messages.
+
 ## Claude's role here
 
 Focus areas for assistance:
