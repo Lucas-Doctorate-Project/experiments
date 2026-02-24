@@ -20,7 +20,10 @@ Each week's raw rows are saved to workloads/<YYYY-MM-DD>/week_fraction.csv.
 
 from __future__ import annotations
 
+import gzip
 import json
+import shutil
+import urllib.request
 from pathlib import Path
 from typing import Optional, Sequence, Union
 
@@ -31,7 +34,8 @@ import pandas as pd
 # Configuration
 # ---------------------------------------------------------------------------
 
-FILENAME = Path(__file__).parent / "mustang_release_v1.0beta.csv"
+FILENAME     = Path(__file__).parent / "mustang_release_v1.0beta.csv"
+DOWNLOAD_URL = "https://ftp.pdl.cmu.edu/pub/datasets/ATLAS/mustang/mustang_release_v1.0beta.csv.gz"
 OUT_DIR  = Path(__file__).parent          # workloads/
 CLUSTER_CAPACITY = 1600                   # Mustang node count
 CORES_PER_NODE   = 24
@@ -43,6 +47,24 @@ WEEKS = [
     ("2015-08-06", "small.json"),   # heavy small-job week
     ("2012-12-13", "mixed.json"),   # mixed week
 ]
+
+# ---------------------------------------------------------------------------
+# Dataset download
+# ---------------------------------------------------------------------------
+
+def ensure_dataset(path: Path = FILENAME, url: str = DOWNLOAD_URL) -> None:
+    """Download and decompress the Mustang CSV if it is not already present."""
+    if path.exists():
+        return
+    gz_path = path.with_suffix(".csv.gz")
+    print(f"Dataset not found. Downloading from {url} …")
+    urllib.request.urlretrieve(url, gz_path)
+    print(f"Decompressing {gz_path.name} …")
+    with gzip.open(gz_path, "rb") as f_in, open(path, "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
+    gz_path.unlink()
+    print(f"Saved to {path}")
+
 
 # ---------------------------------------------------------------------------
 # Duration helper
@@ -312,6 +334,7 @@ def export_weeks(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    ensure_dataset()
     print(f"Loading {FILENAME} …")
     df = pd.read_csv(FILENAME)
     for col in ["submit_time", "start_time", "end_time"]:
