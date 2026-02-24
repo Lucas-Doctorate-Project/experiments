@@ -58,9 +58,9 @@ WORKLOAD_PATHS = {
 }
 
 ENERGY_PATHS = {
-    "clean_energy": "energy-mix/clean_energy_trace.csv",
-    "fossil_heavy": "energy-mix/fossil_heavy_trace.csv",
-    "mixed": "energy-mix/mixed_trace.csv",
+    "clean_energy": "energy-data/clean_energy_trace.csv",
+    "fossil_heavy": "energy-data/fossil_heavy_trace.csv",
+    "mixed": "energy-data/mixed_trace.csv",
 }
 
 PLATFORM_PATH = "platform/mustang_platform.xml"

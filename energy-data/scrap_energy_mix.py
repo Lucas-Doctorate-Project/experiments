@@ -21,7 +21,7 @@ GRID_COMPOSITION_BY_REGION = {
 }
 
 # Per-source intensity factors (UNECE 2020 defaults where available, else IPCC 2014,
-# from intensity-factors/intensities.json). Keys must match source names returned by ENTSO-E.
+# from energy-data/intensities.json). Keys must match source names returned by ENTSO-E.
 CARBON_INTENSITY = {
     "Biomass": 230, "Fossil Gas": 280, "Fossil Hard coal": 630, "Fossil Oil": 280,
     "Hydro Pumped Storage": 81, "Hydro Run-of-river and pondage": 81, "Hydro Water Reservoir": 81,

@@ -26,7 +26,7 @@ Simulations are run with **Batsim** (simulator) and **Batsched** (scheduler), bo
 - **`outputs/<run-name>/experiments.csv`** — Manifest with `id`, `workload`, `energy_grid`, `algorithm`, `queue_order`, `status`, and timing info for every experiment.
 - **`outputs/<run-name>/experiment_XXX/`** — Per-experiment output: `batsim_output.*` (Batsim result files), `batsim.log`, `batsched.log`.
 - **`workloads/`** — Three 7-day Batsim-compatible workloads derived from LANL Mustang traces (2011–2016), with 12 job profiles per workload.
-- **`energy-mix/`** — Three one-week carbon intensity traces (CSV) consumed by Batsim's `--environmental-footprint-dynamic` option.
+- **`energy-data/`** — Three one-week carbon intensity traces (CSV) consumed by Batsim's `--environmental-footprint-dynamic` option, plus `intensities.json` with carbon/water intensity factors per energy technology.
 - **`platform/mustang_platform.xml`** — SimGrid platform model of the Mustang supercomputer, used for all experiments.
 - **`plot_intensities.py`** — Plots the three energy intensity traces; outputs go to `plots/`.
 

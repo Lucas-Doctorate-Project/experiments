@@ -45,7 +45,7 @@ This produces: - `libplatform.so` - `example`
 
 Example:
 
-    PLAT_TYPE=mixed PLAT_JSON=../../intensity-factors/intensities.json ./example
+    PLAT_TYPE=mixed PLAT_JSON=../../energy-data/intensities.json ./example
 
 ------------------------------------------------------------------------
 
