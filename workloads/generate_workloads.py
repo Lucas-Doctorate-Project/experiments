@@ -15,7 +15,6 @@ Outputs:
     workloads/large.json   (week 2012-02-07, mostly large jobs)
     workloads/mixed.json   (week 2012-12-13, mixed job sizes)
 
-Each week's raw rows are saved to workloads/<YYYY-MM-DD>/week_fraction.csv.
 """
 
 from __future__ import annotations
@@ -293,9 +292,6 @@ def export_weeks(
 
         print(f"\n=== {date_name} ({output_name}) ===")
 
-        week_dir = out_dir / date_name
-        week_dir.mkdir(parents=True, exist_ok=True)
-
         # Warm-up context: jobs already running at T0
         ctx_jobs, ctx_profiles = extract_running_context(
             df, week_start,
@@ -307,8 +303,6 @@ def export_weeks(
         week_rows = df[
             (df[submit_col] >= week_start) & (df[submit_col] < week_end)
         ].copy().sort_values(submit_col)
-
-        week_rows.to_csv(week_dir / "week_fraction.csv", index=False)
 
         batsim_obj = make_batsim_workload_json(
             week_rows, week_start, week_end, cluster_capacity,
