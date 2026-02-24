@@ -552,7 +552,21 @@ def main():
         type=Path,
         default=None,
         metavar="DIR",
-        help="Directory to write results into (default: experiments/results)",
+        help="Exact directory to write results into (overrides --runs-dir and --run-name)",
+    )
+    parser.add_argument(
+        "--runs-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Parent directory for all runs (default: experiments/outputs)",
+    )
+    parser.add_argument(
+        "--run-name",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Subdirectory name within --runs-dir (default: auto-generated from timestamp + config)",
     )
     args = parser.parse_args()
 
@@ -567,12 +581,27 @@ def main():
 
     # Setup
     base_dir = Path(__file__).parent.resolve()
-    results_dir = args.output_dir.resolve() if args.output_dir else base_dir / "results"
+
+    if args.output_dir:
+        # Explicit path override — backward-compatible behaviour
+        results_dir = args.output_dir.resolve()
+    else:
+        runs_dir = args.runs_dir.resolve() if args.runs_dir else base_dir / "outputs"
+        if args.run_name:
+            run_name = args.run_name
+        else:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            suffix = f"_{args.config.stem}" if args.config else "_full"
+            run_name = ts + suffix
+        results_dir = runs_dir / run_name
 
     print("=" * 80)
     print("BATSIM/BATSCHED EXPERIMENT RUNNER")
     print("=" * 80)
     print(f"Base directory: {base_dir}")
+    if not args.output_dir:
+        print(f"Runs directory: {results_dir.parent}")
+        print(f"Run name:       {results_dir.name}")
     print(f"Results directory: {results_dir}")
     if args.config:
         print(f"Config file: {args.config.resolve()}")
