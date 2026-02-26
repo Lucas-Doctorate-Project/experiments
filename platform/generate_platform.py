@@ -36,12 +36,11 @@ def generate_platform_xml(output_file, num_nodes=1600):
     master = ET.SubElement(zone, 'host')
     master.set('id', 'master_host')
     master.set('speed', '100Mf')
-    create_prop(master, 'wattage_per_state', '100:200')
-    create_prop(master, 'wattage_off', '10')
+    create_prop(master, 'wattage_per_state', '10:200')
 
     # Create homogeneous compute nodes modelled after Mustang:
     #   1600 nodes, each with 24 AMD Opteron 6176 cores at 2.3 GHz,
-    #   ~160 W idle / ~320 W full load (dual-socket 115 W TDP + memory/chassis). Educated guess.
+    #   Educated guess: 10 W idle (machines are turned off when not in use). 320 W full load (dual-socket 115 W TDP + memory/chassis).
     # The AMD Opteron 6176 is based on the Magny-Cours (K10) architecture and supports SSE2 (128-bit).
     # This means each core can execute at most 2 double-precision FP operations per cycle (via 128-bit SSE).
     for i in range(num_nodes):
@@ -51,8 +50,7 @@ def generate_platform_xml(output_file, num_nodes=1600):
         node.set('core', '24')
 
         create_prop(node, 'role', 'compute_node')
-        create_prop(node, 'wattage_per_state', '160:320')
-        create_prop(node, 'wattage_off', '10')
+        create_prop(node, 'wattage_per_state', '10:320')
 
     # Create tree and write to file
     tree = ET.ElementTree(platform)

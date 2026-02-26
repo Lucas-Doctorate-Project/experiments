@@ -1,6 +1,6 @@
 {
   "workloads": ["small", "large", "mixed"],
-  "energy_scenarios": ["fossil_heavy"],
+  "energy_scenarios": ["clean_energy", "mixed", "fossil_heavy"],
   "algorithms": [
     {
       "name": "easy_bf",

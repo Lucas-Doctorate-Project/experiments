@@ -669,7 +669,7 @@ def main():
         print(f"  → experiment_{config.exp_id:03d}: "
               f"{config.workload_name} + {config.energy_trace_name} + "
               f"{config.algorithm} + {config.queue_order}")
-        result = run_experiment(config, timeout=1800)
+        result = run_experiment(config, timeout=3600)
         with manifest_lock:
             all_results.append(result)
             all_results.sort(key=lambda r: r.config.exp_id)
