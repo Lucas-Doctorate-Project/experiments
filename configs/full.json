@@ -9,7 +9,7 @@
     {
       "name": "greenfilling",
       "queue_orders": ["fcfs", "asc_estimated_area", "asc_f1", "frontier"],
-      "alphas": [0.3]
+      "variant_options": {"smoothing_factor": [0.3]}
     }
   ]
 }

@@ -16,6 +16,7 @@ import shutil
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from itertools import product
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime
@@ -77,7 +78,7 @@ DEFAULT_CONFIG = {
         {
             "name": "greenfilling",
             "queue_orders": ["fcfs", "asc_estimated_area", "asc_f1", "frontier"],
-            "alphas": [0.3],
+            "variant_options": {"smoothing_factor": [0.3]},
         },
     ],
 }
@@ -94,13 +95,17 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, 
             "energy_scenarios": ["clean_energy", "fossil_heavy", "mixed"],
             "algorithms": [
                 {"name": "easy_bf", "queue_orders": ["fcfs"]},
-                {"name": "greenfilling", "queue_orders": ["fcfs"], "alphas": [0.3, 0.5, 0.8]}
+                {
+                    "name": "greenfilling",
+                    "queue_orders": ["fcfs"],
+                    "variant_options": {"smoothing_factor": [0.3, 0.5], "ema_threshold": [0.9, 1.0, 1.1]}
+                }
             ]
         }
 
     Each entry in ``algorithms`` generates one experiment per
-    (workload × energy_scenario × queue_order × alpha).  ``easy_bf`` has no
-    ``alphas`` key (it ignores energy entirely).
+    (workload × energy_scenario × queue_order × Cartesian-product-of-variant_options).
+    ``easy_bf`` has no ``variant_options`` key (it ignores energy entirely).
 
     If ``experiment_config`` is None the DEFAULT_CONFIG is used, which
     reproduces the original 72-experiment full-factorial design.
@@ -135,12 +140,14 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, 
                 queue_orders = alg.get("queue_orders", ["fcfs"])
 
                 # Build the list of variant_options strings for this algorithm.
-                # easy_bf has no alphas; greenfilling defaults to [0.3].
+                # easy_bf has no variant_options; others default to alpha=0.3.
                 if alg_name == "easy_bf":
                     variants = [None]
                 else:
-                    alphas = alg.get("alphas", [0.3])
-                    variants = [json.dumps({"alpha": a}) for a in alphas]
+                    opts = alg.get("variant_options", {"smoothing_factor": [0.3]})
+                    keys = list(opts.keys())
+                    combos = list(product(*[opts[k] for k in keys]))
+                    variants = [json.dumps(dict(zip(keys, combo))) for combo in combos]
 
                 for queue_order in queue_orders:
                     for variant_options in variants:

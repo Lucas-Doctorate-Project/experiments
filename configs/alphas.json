@@ -9,7 +9,7 @@
     {
       "name": "greenfilling",
       "queue_orders": ["fcfs"],
-      "alphas": [0.3, 0.5, 0.8]
+      "variant_options": {"smoothing_factor": [0.3, 0.5, 0.8]}
     }
   ]
 }
