@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plot power over time for two experiments from a chosen experiment set."""
+"""Plot power over time for one or more experiments from a chosen experiment set."""
 
 import json
 import math
@@ -39,21 +39,67 @@ def list_experiments(exp_set: Path) -> pd.DataFrame:
 
 
 def make_label(row: pd.Series) -> str:
-    label = f"{row['output_dir']}  {row['algorithm']}, {row['workload']}"
+    label = (
+        f"{row['output_dir']}  "
+        f"{row['workload']}, {row['energy_grid']}, "
+        f"{row['algorithm']}, {row['queue_order']}"
+    )
     opts = row.get("variant_options", "")
     if pd.notna(opts) and opts:
         try:
             d = json.loads(opts)
             parts = ", ".join(f"{k}={v}" for k, v in d.items())
-            label += f"  ({parts})"
+            label += f", {parts}"
         except (json.JSONDecodeError, TypeError):
             pass
     return label
 
 
+def make_plot_label(row: pd.Series) -> str:
+    """Short label for the plot legend (keeps the legend compact)."""
+    out_dir = str(row.get("output_dir", "")).strip()
+    exp_id = out_dir.replace("experiment_", "exp")
+
+    algo = str(row.get("algorithm", "")).strip()
+    algo_short = {
+        "easy_bf": "easy",
+        "greenfilling": "gf",
+    }.get(algo, algo or "algo")
+
+    parts = [exp_id, algo_short]
+
+    opts = row.get("variant_options", "")
+    if pd.notna(opts) and opts:
+        try:
+            d = json.loads(opts)
+        except (json.JSONDecodeError, TypeError):
+            d = {}
+        if "alpha" in d:
+            try:
+                parts.append(f"a={float(d['alpha']):g}")
+            except (TypeError, ValueError):
+                parts.append(f"a={d['alpha']}")
+
+    return " ".join(parts)
+
+
 def get_alpha(row1: pd.Series, row2: pd.Series) -> float:
     """Return the greenfilling alpha from either experiment, or the default."""
     for row in [row1, row2]:
+        opts = row.get("variant_options", "")
+        if pd.notna(opts) and opts:
+            try:
+                d = json.loads(opts)
+                if "alpha" in d:
+                    return float(d["alpha"])
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+    return DEFAULT_EMA_ALPHA
+
+
+def get_alpha_from_rows(rows: list[pd.Series]) -> float:
+    """Return the first found greenfilling alpha across selected experiments."""
+    for row in rows:
         opts = row.get("variant_options", "")
         if pd.notna(opts) and opts:
             try:
@@ -220,10 +266,7 @@ def ask_time_window(min_t: float, max_t: float) -> tuple[float, float]:
 # ── plot ──────────────────────────────────────────────────────────────────────
 
 def plot_power(
-    df1: pd.DataFrame,
-    df2: pd.DataFrame,
-    label1: str,
-    label2: str,
+    series: list[tuple[pd.DataFrame, str]],
     intensity: pd.DataFrame,
     ema_alpha: float,
     grid_label: str,
@@ -266,10 +309,12 @@ def plot_power(
     ax_int.set_xlim(t_start, t_end)
 
     # ── power foreground ──────────────────────────────────────────────────────
-    for df, label, color in [
-        (df1, label1, "#1f77b4"),
-        (df2, label2, "#ff7f0e"),
-    ]:
+    colors = plt.rcParams["axes.prop_cycle"].by_key().get(
+        "color", ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
+    )
+
+    for i, (df, label) in enumerate(series):
+        color = colors[i % len(colors)]
         windowed = extend_to_window(df, "epower", t_start, t_end)
         ax_power.step(
             windowed["time"], windowed["epower"] / 1e3,
@@ -289,6 +334,7 @@ def plot_power(
     # Combined legend — place it below the plot to avoid covering data
     h1, l1 = ax_power.get_legend_handles_labels()
     h2, l2 = ax_int.get_legend_handles_labels()
+    ncol = min(4, max(1, len(h1 + h2)))
     ax_power.legend(
         h1 + h2,
         l1 + l2,
@@ -296,7 +342,7 @@ def plot_power(
         bbox_to_anchor=(0.5, -0.15),
         borderaxespad=0.0,
         fontsize=8,
-        ncol=2,
+        ncol=ncol,
     )
 
     fig.tight_layout(rect=[0, 0.08, 1, 1])
@@ -326,7 +372,7 @@ def main():
         title="Experiment set", expand=False,
     ))
 
-    # Step 2: pick first experiment
+    # Step 2: pick experiments (multi-select)
     experiments = list_experiments(chosen_set)
     if len(experiments) < 2:
         console.print("[red]Need at least 2 successful experiments to compare.[/red]")
@@ -334,75 +380,67 @@ def main():
 
     labels = [make_label(row) for _, row in experiments.iterrows()]
 
-    choice1 = questionary.select(
-        "Select first experiment:",
+    choices = questionary.checkbox(
+        "Select experiments to plot (space to toggle, enter to confirm):",
         choices=labels,
-        use_indicator=True,
+        validate=lambda selected: True if len(selected) >= 2 else "Select at least 2 experiments.",
     ).ask()
-    if choice1 is None:
+    if choices is None:
         sys.exit(0)
 
-    idx1 = labels.index(choice1)
+    selected_idxs = [labels.index(c) for c in choices]
+    selected_rows = [experiments.iloc[i] for i in selected_idxs]
+    ref_row = selected_rows[0]
+
     console.print(Panel(
-        Text(choice1, style="bold green"),
-        title="First experiment", expand=False,
-    ))
-
-    # Step 3: pick second experiment
-    remaining = [l for i, l in enumerate(labels) if i != idx1]
-
-    choice2 = questionary.select(
-        "Select second experiment:",
-        choices=remaining,
-        use_indicator=True,
-    ).ask()
-    if choice2 is None:
-        sys.exit(0)
-
-    idx2 = labels.index(choice2)
-    console.print(Panel(
-        Text(choice2, style="bold yellow"),
-        title="Second experiment", expand=False,
+        Text("\n".join(choices), style="bold"),
+        title=f"Selected experiments ({len(choices)})",
+        expand=False,
     ))
 
     # Step 4: load data
-    row1, row2 = experiments.iloc[idx1], experiments.iloc[idx2]
-    ema_alpha = get_alpha(row1, row2)
+    ema_alpha = get_alpha_from_rows(selected_rows)
 
     with console.status("Loading power and intensity data…"):
-        df1 = load_power(chosen_set / row1["output_dir"])
-        df2 = load_power(chosen_set / row2["output_dir"])
-        intensity = load_intensity(chosen_set / row1["output_dir"])
+        series: list[tuple[pd.DataFrame, str]] = []
+        for row, _label in zip(selected_rows, choices):
+            df = load_power(chosen_set / row["output_dir"])
+            series.append((df, make_plot_label(row)))
+        intensity = load_intensity(chosen_set / ref_row["output_dir"])
 
-    grid1 = row1.get("energy_grid", "")
-    grid2 = row2.get("energy_grid", "")
-    if pd.notna(grid1) and pd.notna(grid2) and grid1 != grid2:
+    ref_grid = ref_row.get("energy_grid", "")
+    grid_label = ref_grid if pd.notna(ref_grid) and ref_grid else "grid"
+
+    grids = []
+    for row in selected_rows:
+        g = row.get("energy_grid", "")
+        if pd.notna(g) and g:
+            grids.append(str(g))
+    unique_grids = sorted(set(grids))
+    if len(unique_grids) > 1:
         console.print(
-            f"[yellow]Warning:[/yellow] experiments use different grids "
-            f"({grid1} vs {grid2}). Showing intensity for {grid1}."
+            f"[yellow]Warning:[/yellow] selected experiments use different grids "
+            f"({', '.join(unique_grids)}). Showing intensity for {grid_label}."
         )
-    grid_label = grid1 if pd.notna(grid1) and grid1 else "grid"
 
-    console.print(
-        f"[dim]{row1['output_dir']}:[/dim] {len(df1)} points, "
-        f"max [bold]{df1['epower'].max() / 1e3:.1f} kW[/bold]"
-    )
-    console.print(
-        f"[dim]{row2['output_dir']}:[/dim] {len(df2)} points, "
-        f"max [bold]{df2['epower'].max() / 1e3:.1f} kW[/bold]"
-    )
+    for (df, label), row in zip(series, selected_rows):
+        console.print(
+            f"[dim]{row['output_dir']}:[/dim] {len(df)} points, "
+            f"max [bold]{df['epower'].max() / 1e3:.1f} kW[/bold] "
+            f"[dim]({label})[/dim]"
+        )
     console.print(
         f"[dim]EMA α:[/dim] [bold]{ema_alpha}[/bold]"
         + ("" if ema_alpha != DEFAULT_EMA_ALPHA else " [dim](default)[/dim]")
     )
 
     # Step 6: time window — limits from power data
-    global_min = min(df1["time"].min(), df2["time"].min())
-    global_max = max(df1["time"].max(), df2["time"].max())
+    global_min = min(df["time"].min() for df, _ in series)
+    global_max = max(df["time"].max() for df, _ in series)
     t_start, t_end = ask_time_window(global_min, global_max)
 
     plot_power(
-        df1, df2, choice1.strip(), choice2.strip(),
+        series,
         intensity, ema_alpha, grid_label,
         f"Power over time — {chosen_set.name}",
         t_start, t_end,
