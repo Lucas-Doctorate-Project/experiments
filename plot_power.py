@@ -68,13 +68,18 @@ def get_alpha(row1: pd.Series, row2: pd.Series) -> float:
 def load_power(exp_dir: Path) -> pd.DataFrame:
     """Load epower vs time, resolving degenerate simultaneous events.
 
-    When multiple events share the same timestamp, only the last row is kept
-    because each row's epower already reflects the cumulative state after all
-    events at that instant. Earlier rows at the same time are intermediate
-    states that are never actually sustained.
+    Batsim occasionally writes several energy rows with the *same* timestamp,
+    for example when intensity queries or DVFS events happen at the exact same
+    simulation time as job events. Some of these trailing rows may carry
+    inconsistent or placeholder ``epower`` values (including zeros or NaNs)
+    that do **not** correspond to a sustained cluster state.
+
+    To obtain a stable power trace, keep the *first* row for each timestamp,
+    which corresponds to the canonical energy update emitted before any extra
+    bookkeeping events at the same time.
     """
     df = pd.read_csv(exp_dir / ENERGY_FILE, usecols=["time", "epower"])
-    df = df.drop_duplicates(subset=["time"], keep="last").reset_index(drop=True)
+    df = df.drop_duplicates(subset=["time"], keep="first").reset_index(drop=True)
     return df.sort_values("time").reset_index(drop=True)
 
 
@@ -281,12 +286,20 @@ def plot_power(
     ax_power.set_zorder(ax_int.get_zorder() + 1)
     ax_power.patch.set_visible(False)
 
-    # Combined legend
+    # Combined legend — place it below the plot to avoid covering data
     h1, l1 = ax_power.get_legend_handles_labels()
     h2, l2 = ax_int.get_legend_handles_labels()
-    ax_power.legend(h1 + h2, l1 + l2, loc="upper right", fontsize=8)
+    ax_power.legend(
+        h1 + h2,
+        l1 + l2,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.15),
+        borderaxespad=0.0,
+        fontsize=8,
+        ncol=2,
+    )
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0.08, 1, 1])
     plt.show()
 
 
