@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from matplotlib.widgets import CheckButtons
 import questionary
 from rich.console import Console
 from rich.panel import Panel
@@ -56,59 +57,40 @@ def make_label(row: pd.Series) -> str:
 
 
 def make_plot_label(row: pd.Series) -> str:
-    """Short label for the plot legend (keeps the legend compact)."""
+    """Legend/window label: uppercase experiment directory name."""
     out_dir = str(row.get("output_dir", "")).strip()
-    exp_id = out_dir.replace("experiment_", "exp")
+    return out_dir.upper().replace("_", " ") if out_dir else "EXPERIMENT"
 
-    algo = str(row.get("algorithm", "")).strip()
-    algo_short = {
-        "easy_bf": "easy",
-        "greenfilling": "gf",
-    }.get(algo, algo or "algo")
 
-    parts = [exp_id, algo_short]
-
+def get_alpha_from_row(row: pd.Series) -> float:
+    """Return this experiment's greenfilling alpha, or default if missing."""
     opts = row.get("variant_options", "")
     if pd.notna(opts) and opts:
         try:
             d = json.loads(opts)
-        except (json.JSONDecodeError, TypeError):
-            d = {}
-        if "alpha" in d:
-            try:
-                parts.append(f"a={float(d['alpha']):g}")
-            except (TypeError, ValueError):
-                parts.append(f"a={d['alpha']}")
-
-    return " ".join(parts)
-
-
-def get_alpha(row1: pd.Series, row2: pd.Series) -> float:
-    """Return the greenfilling alpha from either experiment, or the default."""
-    for row in [row1, row2]:
-        opts = row.get("variant_options", "")
-        if pd.notna(opts) and opts:
-            try:
-                d = json.loads(opts)
-                if "alpha" in d:
-                    return float(d["alpha"])
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
+            if "alpha" in d:
+                return float(d["alpha"])
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
     return DEFAULT_EMA_ALPHA
 
 
-def get_alpha_from_rows(rows: list[pd.Series]) -> float:
-    """Return the first found greenfilling alpha across selected experiments."""
-    for row in rows:
-        opts = row.get("variant_options", "")
-        if pd.notna(opts) and opts:
-            try:
-                d = json.loads(opts)
-                if "alpha" in d:
-                    return float(d["alpha"])
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass
-    return DEFAULT_EMA_ALPHA
+def is_greenfilling(row: pd.Series) -> bool:
+    """True when the selected algorithm is a greenfilling variant."""
+    algo = str(row.get("algorithm", "")).strip().lower()
+    return "greenfilling" in algo
+
+
+def is_easy_bf(row: pd.Series) -> bool:
+    """True when the selected algorithm is easy backfilling."""
+    algo = str(row.get("algorithm", "")).strip().lower()
+    return algo == "easy_bf"
+
+
+def make_window_label(row: pd.Series, alpha: float) -> str:
+    """Window toggle label; mirrors legend experiment naming."""
+    _ = alpha
+    return make_plot_label(row)
 
 
 def load_power(exp_dir: Path) -> pd.DataFrame:
@@ -199,6 +181,23 @@ def extend_to_window(
     return result.sort_values("time").reset_index(drop=True)
 
 
+def power_difference_vs_baseline(
+    baseline_df: pd.DataFrame, other_df: pd.DataFrame, t_start: float, t_end: float
+) -> pd.DataFrame:
+    """Return step-aligned (other - baseline) power difference over the window."""
+    bsub = extend_to_window(baseline_df[["time", "epower"]], "epower", t_start, t_end)
+    osub = extend_to_window(other_df[["time", "epower"]], "epower", t_start, t_end)
+
+    times = sorted(set(bsub["time"].tolist()) | set(osub["time"].tolist()))
+    b = bsub.set_index("time")["epower"].reindex(times).ffill()
+    o = osub.set_index("time")["epower"].reindex(times).ffill()
+
+    return pd.DataFrame({
+        "time": times,
+        "diff_kw": (o - b) / 1e3,
+    })
+
+
 def time_unit_for(max_time_s: float) -> tuple[float, str]:
     if max_time_s > 3600:
         return 3600.0, "h"
@@ -212,7 +211,15 @@ def ask_time_window(min_t: float, max_t: float) -> tuple[float, float]:
     divisor, unit = time_unit_for(max_t)
     lo, hi = min_t / divisor, max_t / divisor
 
-    def validate_float(v: str, *, lo=lo, hi=hi) -> bool | str:
+    # Avoid suggesting defaults that become invalid after decimal rounding.
+    precision = 2
+    scale = 10 ** precision
+    lo_display = math.ceil(lo * scale) / scale
+    hi_display = math.floor(hi * scale) / scale
+    if lo_display > hi_display:
+        lo_display, hi_display = lo, hi
+
+    def validate_float(v: str, *, lo=lo_display, hi=hi_display) -> bool | str:
         try:
             f = float(v)
         except ValueError:
@@ -222,12 +229,12 @@ def ask_time_window(min_t: float, max_t: float) -> tuple[float, float]:
         return True
 
     console.print(
-        f"[dim]Available range:[/dim] [bold]{lo:.2f} – {hi:.2f} {unit}[/bold]"
+        f"[dim]Available range:[/dim] [bold]{lo_display:.2f} – {hi_display:.2f} {unit}[/bold]"
     )
 
     t_start = questionary.text(
         f"Start time ({unit}):",
-        default=f"{lo:.2f}",
+        default=f"{lo_display:.2f}",
         validate=validate_float,
     ).ask()
     if t_start is None:
@@ -240,13 +247,13 @@ def ask_time_window(min_t: float, max_t: float) -> tuple[float, float]:
             f = float(v)
         except ValueError:
             return "Enter a number."
-        if not (t_end_lo < f <= hi):
-            return f"Must be greater than {t_end_lo:.2f} and at most {hi:.2f}."
+        if not (t_end_lo < f <= hi_display):
+            return f"Must be greater than {t_end_lo:.2f} and at most {hi_display:.2f}."
         return True
 
     t_end = questionary.text(
         f"End time ({unit}):",
-        default=f"{hi:.2f}",
+        default=f"{hi_display:.2f}",
         validate=validate_end,
     ).ask()
     if t_end is None:
@@ -267,85 +274,180 @@ def ask_time_window(min_t: float, max_t: float) -> tuple[float, float]:
 
 def plot_power(
     series: list[tuple[pd.DataFrame, str]],
-    intensity: pd.DataFrame,
-    ema_alpha: float,
-    grid_label: str,
-    title: str,
+    green_windows: list[dict],
     t_start: float,
     t_end: float,
 ):
-    fig, ax_power = plt.subplots(figsize=(13, 5))
+    fig, (ax_power, ax_diff) = plt.subplots(
+        2,
+        1,
+        figsize=(13, 7),
+        sharex=True,
+        gridspec_kw={"height_ratios": [3.0, 1.4]},
+    )
     ax_int = ax_power.twinx()
 
     divisor, unit = time_unit_for(t_end)
 
     # Tick locator: multiples of the display unit, ~7 ticks across the window.
     step_s = _nice_step((t_end - t_start) / divisor) * divisor
-    ax_power.xaxis.set_major_locator(ticker.MultipleLocator(step_s))
-    ax_power.xaxis.set_major_formatter(
+    ax_diff.xaxis.set_major_locator(ticker.MultipleLocator(step_s))
+    ax_diff.xaxis.set_major_formatter(
         ticker.FuncFormatter(lambda x, _: f"{x / divisor:g}")
     )
 
-    # ── high-intensity background ─────────────────────────────────────────────
+    # ── high-intensity windows (one per greenfilling experiment) ─────────────
     # EMA uses adjust=False — standard recursive formula EMA_t = α·x_t + (1−α)·EMA_{t−1}.
-    # Computed on the full dataset so values inside the window carry prior history,
-    # matching what the greenfilling algorithm sees at runtime.
-    intensity = intensity.copy()
-    ci_ema = intensity["ci"].ewm(alpha=ema_alpha, adjust=False).mean()
-    wi_ema = intensity["wi"].ewm(alpha=ema_alpha, adjust=False).mean()
-    intensity["allowed"] = (
-        (intensity["ci"] <= ci_ema) & (intensity["wi"] <= wi_ema)
-    ).astype(int)
+    # Computed on full intensity traces so values inside the window carry prior
+    # history, matching what greenfilling sees at runtime.
+    window_artists: list = []
+    window_labels: list[str] = []
+    window_colors_used: list = []
+    baseline_color = "#111111"
+    window_palette = [
+        "#ff7f0e",  # orange
+        "#2ca02c",  # green
+        "#d62728",  # red
+        "#9467bd",  # purple
+        "#8c564b",  # brown
+        "#e377c2",  # pink
+        "#17becf",  # cyan
+        "#bcbd22",  # olive
+    ]
 
-    isub = extend_to_window(intensity[["time", "allowed"]], "allowed", t_start, t_end)
+    for i, window in enumerate(green_windows):
+        intensity = window["intensity"].copy()
+        alpha = window["alpha"]
+        ci_ema = intensity["ci"].ewm(alpha=alpha, adjust=False).mean()
+        wi_ema = intensity["wi"].ewm(alpha=alpha, adjust=False).mean()
+        intensity["allowed"] = (
+            (intensity["ci"] <= ci_ema) & (intensity["wi"] <= wi_ema)
+        ).astype(int)
 
-    ax_int.fill_between(
-        isub["time"], isub["allowed"],
-        step="post", color="#2ca02c", alpha=0.12, zorder=1,
-        label=f"CI & WI ≤ EMA — backfilling allowed (α={ema_alpha}, {grid_label})",
-    )
+        isub = extend_to_window(
+            intensity[["time", "allowed"]], "allowed", t_start, t_end
+        )
+        color = window_palette[i % len(window_palette)]
+        artist = ax_int.fill_between(
+            isub["time"],
+            isub["allowed"],
+            step="post",
+            color=color,
+            alpha=0.11,
+            zorder=1,
+            label="_nolegend_",
+        )
+        window_artists.append(artist)
+        window_labels.append(window["label"])
+        window_colors_used.append(color)
+
     ax_int.set_ylim(0, 1)
     ax_int.yaxis.set_visible(False)
     ax_int.set_xlim(t_start, t_end)
 
     # ── power foreground ──────────────────────────────────────────────────────
-    colors = plt.rcParams["axes.prop_cycle"].by_key().get(
-        "color", ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
-    )
+    line_artists_by_label: dict[str, list] = {}
+    diff_line_artist_by_label: dict[str, any] = {}
+    window_color_by_label = {
+        label: color for label, color in zip(window_labels, window_colors_used)
+    }
+    baseline_df, _baseline_label = series[0]
 
     for i, (df, label) in enumerate(series):
-        color = colors[i % len(colors)]
+        # Baseline (first selected series) stays visually distinct.
+        color = (
+            window_color_by_label.get(label, baseline_color)
+            if i == 0
+            else window_color_by_label.get(label, "#1f77b4")
+        )
         windowed = extend_to_window(df, "epower", t_start, t_end)
-        ax_power.step(
+        line_artist = ax_power.step(
             windowed["time"], windowed["epower"] / 1e3,
             where="post", label=label, color=color,
             linewidth=1.4, alpha=0.9, zorder=3,
-        )
+        )[0]
+        line_artists_by_label.setdefault(label, []).append(line_artist)
+        if i > 0:
+            diff = power_difference_vs_baseline(baseline_df, df, t_start, t_end)
+            diff_artist = ax_diff.step(
+                diff["time"],
+                diff["diff_kw"],
+                where="post",
+                color=color,
+                label=label,
+                linewidth=1.3,
+                alpha=0.95,
+            )[0]
+            diff_line_artist_by_label[label] = diff_artist
 
-    ax_power.set_xlabel(f"Simulation time ({unit})")
+    ax_power.tick_params(axis="x", which="both", labelbottom=False)
     ax_power.set_ylabel("Power (kW)")
-    ax_power.set_title(title)
     ax_power.set_xlim(t_start, t_end)
     ax_power.set_ylim(bottom=0)
     ax_power.grid(axis="y", linestyle="--", alpha=0.35, zorder=0)
     ax_power.set_zorder(ax_int.get_zorder() + 1)
     ax_power.patch.set_visible(False)
 
-    # Combined legend — place it below the plot to avoid covering data
+    ax_diff.axhline(0.0, color="#777777", linewidth=1.0, linestyle="--", zorder=1)
+    ax_diff.set_ylabel("Delta kW")
+    ax_diff.set_xlabel(f"Simulation time ({unit})")
+    ax_diff.set_xlim(t_start, t_end)
+    ax_diff.grid(axis="y", linestyle="--", alpha=0.35, zorder=0)
+
+    # Keep legend clean: only selected experiment lines.
     h1, l1 = ax_power.get_legend_handles_labels()
-    h2, l2 = ax_int.get_legend_handles_labels()
-    ncol = min(4, max(1, len(h1 + h2)))
+    ncol = min(4, max(1, len(h1)))
     ax_power.legend(
-        h1 + h2,
-        l1 + l2,
-        loc="upper center",
-        bbox_to_anchor=(0.5, -0.15),
+        h1,
+        l1,
+        loc="lower left",
+        bbox_to_anchor=(0.0, 1.02),
         borderaxespad=0.0,
         fontsize=8,
         ncol=ncol,
     )
 
-    fig.tight_layout(rect=[0, 0.08, 1, 1])
+    if window_artists:
+        window_line_artists = [
+            line_artists_by_label.get(label, []) for label in window_labels
+        ]
+        for artist, lines in zip(window_artists, window_line_artists):
+            artist.set_visible(False)
+            for ln in lines:
+                ln.set_visible(False)
+        for label in window_labels:
+            diff_artist = diff_line_artist_by_label.get(label)
+            if diff_artist is not None:
+                diff_artist.set_visible(False)
+
+        fig.subplots_adjust(right=0.74, bottom=0.1, top=0.9, hspace=0.1)
+        top = ax_power.get_position()
+        bottom = ax_diff.get_position()
+        panel_y0 = bottom.y0
+        panel_y1 = top.y1
+        panel = fig.add_axes([0.76, panel_y0, 0.22, panel_y1 - panel_y0])
+        panel.set_xticks([])
+        panel.set_yticks([])
+        checks = CheckButtons(panel, window_labels, [False] * len(window_labels))
+        for i, txt in enumerate(checks.labels):
+            txt.set_fontsize(8)
+            txt.set_color(window_colors_used[i])
+
+        def _on_toggle(label: str) -> None:
+            idx = window_labels.index(label)
+            visible = not window_artists[idx].get_visible()
+            window_artists[idx].set_visible(visible)
+            for ln in window_line_artists[idx]:
+                ln.set_visible(visible)
+            diff_artist = diff_line_artist_by_label.get(label)
+            if diff_artist is not None:
+                diff_artist.set_visible(visible)
+            fig.canvas.draw_idle()
+
+        checks.on_clicked(_on_toggle)
+    else:
+        fig.subplots_adjust(bottom=0.1, top=0.9, hspace=0.1)
+
     plt.show()
 
 
@@ -372,56 +474,81 @@ def main():
         title="Experiment set", expand=False,
     ))
 
-    # Step 2: pick experiments (multi-select)
+    # Step 2: choose one easy_bf baseline
     experiments = list_experiments(chosen_set)
     if len(experiments) < 2:
         console.print("[red]Need at least 2 successful experiments to compare.[/red]")
         sys.exit(1)
 
-    labels = [make_label(row) for _, row in experiments.iterrows()]
+    baseline_candidates = [
+        row for _, row in experiments.iterrows() if is_easy_bf(row)
+    ]
+    if not baseline_candidates:
+        console.print("[red]No successful easy_bf experiment found for baseline.[/red]")
+        sys.exit(1)
 
-    choices = questionary.checkbox(
-        "Select experiments to plot (space to toggle, enter to confirm):",
-        choices=labels,
-        validate=lambda selected: True if len(selected) >= 2 else "Select at least 2 experiments.",
+    baseline_labels = [make_label(row) for row in baseline_candidates]
+    chosen_baseline_label = questionary.select(
+        "Select baseline experiment (easy_bf):",
+        choices=baseline_labels,
+        use_indicator=True,
     ).ask()
-    if choices is None:
+    if chosen_baseline_label is None:
         sys.exit(0)
 
-    selected_idxs = [labels.index(c) for c in choices]
-    selected_rows = [experiments.iloc[i] for i in selected_idxs]
-    ref_row = selected_rows[0]
+    baseline_row = baseline_candidates[baseline_labels.index(chosen_baseline_label)]
 
+    # Step 3: choose one or more greenfilling experiments for comparison
+    comparison_candidates = [
+        row for _, row in experiments.iterrows() if is_greenfilling(row)
+    ]
+    if not comparison_candidates:
+        console.print("[red]No successful greenfilling experiments found.[/red]")
+        sys.exit(1)
+
+    comparison_labels = [make_label(row) for row in comparison_candidates]
+    chosen_comparison_labels = questionary.checkbox(
+        "Select greenfilling experiments to compare (space to toggle, enter to confirm):",
+        choices=comparison_labels,
+        validate=lambda selected: (
+            True if len(selected) >= 1 else "Select at least 1 greenfilling experiment."
+        ),
+    ).ask()
+    if chosen_comparison_labels is None:
+        sys.exit(0)
+
+    comparison_rows = [
+        comparison_candidates[comparison_labels.index(label)]
+        for label in chosen_comparison_labels
+    ]
+    selected_rows = [baseline_row, *comparison_rows]
     console.print(Panel(
-        Text("\n".join(choices), style="bold"),
-        title=f"Selected experiments ({len(choices)})",
+        Text(
+            "Baseline:\n"
+            f"{chosen_baseline_label}\n\n"
+            "Comparisons:\n"
+            + "\n".join(chosen_comparison_labels),
+            style="bold",
+        ),
+        title=f"Selected experiments ({len(selected_rows)})",
         expand=False,
     ))
 
     # Step 4: load data
-    ema_alpha = get_alpha_from_rows(selected_rows)
-
     with console.status("Loading power and intensity data…"):
         series: list[tuple[pd.DataFrame, str]] = []
-        for row, _label in zip(selected_rows, choices):
+        green_windows: list[dict] = []
+        for row in selected_rows:
             df = load_power(chosen_set / row["output_dir"])
             series.append((df, make_plot_label(row)))
-        intensity = load_intensity(chosen_set / ref_row["output_dir"])
-
-    ref_grid = ref_row.get("energy_grid", "")
-    grid_label = ref_grid if pd.notna(ref_grid) and ref_grid else "grid"
-
-    grids = []
-    for row in selected_rows:
-        g = row.get("energy_grid", "")
-        if pd.notna(g) and g:
-            grids.append(str(g))
-    unique_grids = sorted(set(grids))
-    if len(unique_grids) > 1:
-        console.print(
-            f"[yellow]Warning:[/yellow] selected experiments use different grids "
-            f"({', '.join(unique_grids)}). Showing intensity for {grid_label}."
-        )
+            if is_greenfilling(row):
+                gf_alpha = get_alpha_from_row(row)
+                gf_intensity = load_intensity(chosen_set / row["output_dir"])
+                green_windows.append({
+                    "label": make_window_label(row, gf_alpha),
+                    "intensity": gf_intensity,
+                    "alpha": gf_alpha,
+                })
 
     for (df, label), row in zip(series, selected_rows):
         console.print(
@@ -429,10 +556,17 @@ def main():
             f"max [bold]{df['epower'].max() / 1e3:.1f} kW[/bold] "
             f"[dim]({label})[/dim]"
         )
-    console.print(
-        f"[dim]EMA α:[/dim] [bold]{ema_alpha}[/bold]"
-        + ("" if ema_alpha != DEFAULT_EMA_ALPHA else " [dim](default)[/dim]")
-    )
+    if green_windows:
+        for gw in green_windows:
+            default_tag = " [dim](default α)[/dim]" if gw["alpha"] == DEFAULT_EMA_ALPHA else ""
+            console.print(
+                f"[dim]Window:[/dim] {gw['label']}{default_tag}"
+            )
+    else:
+        console.print(
+            "[yellow]No greenfilling experiments selected.[/yellow] "
+            "Only power traces will be shown."
+        )
 
     # Step 6: time window — limits from power data
     global_min = min(df["time"].min() for df, _ in series)
@@ -441,8 +575,7 @@ def main():
 
     plot_power(
         series,
-        intensity, ema_alpha, grid_label,
-        f"Power over time — {chosen_set.name}",
+        green_windows,
         t_start, t_end,
     )
 
