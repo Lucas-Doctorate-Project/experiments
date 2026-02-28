@@ -673,9 +673,10 @@ def main():
     def run_and_record(config: ExperimentConfig) -> Optional[ExperimentResult]:
         if shutdown_event.is_set():
             return None
+        opts_str = f" + {config.variant_options}" if config.variant_options else ""
         print(f"  → experiment_{config.exp_id:03d}: "
               f"{config.workload_name} + {config.energy_trace_name} + "
-              f"{config.algorithm} + {config.queue_order}")
+              f"{config.algorithm} + {config.queue_order}{opts_str}")
         result = run_experiment(config, timeout=3600)
         with manifest_lock:
             all_results.append(result)
