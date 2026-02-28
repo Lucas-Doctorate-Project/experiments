@@ -20,7 +20,8 @@ ENERGY_FILE = "batsim_output_consumed_energy.csv"
 CARBON_FILE = "batsim_output_carbon_footprint.csv"
 EXPERIMENTS_CSV = "experiments.csv"
 
-DEFAULT_EMA_ALPHA = 0.5
+DEFAULT_EMA_ALPHA = 0.3
+DEFAULT_EMA_THRESHOLD = 1.0
 
 console = Console()
 
@@ -63,16 +64,29 @@ def make_plot_label(row: pd.Series) -> str:
 
 
 def get_alpha_from_row(row: pd.Series) -> float:
-    """Return this experiment's greenfilling alpha, or default if missing."""
+    """Return this experiment's greenfilling smoothing factor, or default if missing."""
     opts = row.get("variant_options", "")
     if pd.notna(opts) and opts:
         try:
             d = json.loads(opts)
-            if "alpha" in d:
-                return float(d["alpha"])
+            if "smoothing_factor" in d:
+                return float(d["smoothing_factor"])
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
     return DEFAULT_EMA_ALPHA
+
+
+def get_threshold_from_row(row: pd.Series) -> float:
+    """Return this experiment's ema_threshold, or default if missing."""
+    opts = row.get("variant_options", "")
+    if pd.notna(opts) and opts:
+        try:
+            d = json.loads(opts)
+            if "ema_threshold" in d:
+                return float(d["ema_threshold"])
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+    return DEFAULT_EMA_THRESHOLD
 
 
 def is_greenfilling(row: pd.Series) -> bool:
@@ -320,8 +334,9 @@ def plot_power(
         alpha = window["alpha"]
         ci_ema = intensity["ci"].ewm(alpha=alpha, adjust=False).mean()
         wi_ema = intensity["wi"].ewm(alpha=alpha, adjust=False).mean()
+        threshold = window["threshold"]
         intensity["allowed"] = (
-            (intensity["ci"] <= ci_ema) & (intensity["wi"] <= wi_ema)
+            (intensity["ci"] <= threshold * ci_ema) & (intensity["wi"] <= threshold * wi_ema)
         ).astype(int)
 
         isub = extend_to_window(
@@ -543,11 +558,13 @@ def main():
             series.append((df, make_plot_label(row)))
             if is_greenfilling(row):
                 gf_alpha = get_alpha_from_row(row)
+                gf_threshold = get_threshold_from_row(row)
                 gf_intensity = load_intensity(chosen_set / row["output_dir"])
                 green_windows.append({
                     "label": make_window_label(row, gf_alpha),
                     "intensity": gf_intensity,
                     "alpha": gf_alpha,
+                    "threshold": gf_threshold,
                 })
 
     for (df, label), row in zip(series, selected_rows):
@@ -558,7 +575,7 @@ def main():
         )
     if green_windows:
         for gw in green_windows:
-            default_tag = " [dim](default α)[/dim]" if gw["alpha"] == DEFAULT_EMA_ALPHA else ""
+            default_tag = " [dim](defaults)[/dim]" if gw["alpha"] == DEFAULT_EMA_ALPHA and gw["threshold"] == DEFAULT_EMA_THRESHOLD else ""
             console.print(
                 f"[dim]Window:[/dim] {gw['label']}{default_tag}"
             )
