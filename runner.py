@@ -66,25 +66,7 @@ ENERGY_PATHS = {
 
 PLATFORM_PATH = "platform/mustang_platform.xml"
 
-# Default design — kept in sync with configs/full.json
-DEFAULT_CONFIG = {
-    "workloads": ["small", "large", "mixed"],
-    "energy_scenarios": ["clean_energy", "fossil_heavy", "mixed"],
-    "algorithms": [
-        {
-            "name": "easy_bf",
-            "queue_orders": ["fcfs", "asc_estimated_area", "asc_f1", "frontier"],
-        },
-        {
-            "name": "greenfilling",
-            "queue_orders": ["fcfs", "asc_estimated_area", "asc_f1", "frontier"],
-            "variant_options": {"smoothing_factor": [0.3]},
-        },
-    ],
-}
-
-
-def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, results_dir: Path = None) -> List[ExperimentConfig]:
+def generate_experiment_configs(base_dir: Path, experiment_config: dict, results_dir: Path = None) -> List[ExperimentConfig]:
     """
     Generate experiment configurations from a config dict.
 
@@ -98,7 +80,7 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, 
                 {
                     "name": "greenfilling",
                     "queue_orders": ["fcfs"],
-                    "variant_options": {"smoothing_factor": [0.3, 0.5], "ema_threshold": [0.9, 1.0, 1.1]}
+                    "variant_options": {"carbon_min": [50.0], "carbon_max": [700.0], "water_min": [0.1], "water_max": [5.0], "green_floor": [0.1]}
                 }
             ]
         }
@@ -107,17 +89,14 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, 
     (workload × energy_scenario × queue_order × Cartesian-product-of-variant_options).
     ``easy_bf`` has no ``variant_options`` key (it ignores energy entirely).
 
-    If ``experiment_config`` is None the DEFAULT_CONFIG is used, which
-    reproduces the original 72-experiment full-factorial design.
-
     Args:
         base_dir: Base directory containing workloads, platforms, and energy traces
-        experiment_config: Config dict, or None to use DEFAULT_CONFIG
+        experiment_config: Config dict
 
     Returns:
         List of ExperimentConfig objects
     """
-    cfg = experiment_config if experiment_config is not None else DEFAULT_CONFIG
+    cfg = experiment_config
     if results_dir is None:
         results_dir = base_dir / "results"
 
@@ -135,7 +114,7 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, 
 
     for workload_name, workload_path in workloads:
         for energy_trace_name, energy_trace_path in energy_scenarios:
-            for alg in cfg.get("algorithms", DEFAULT_CONFIG["algorithms"]):
+            for alg in cfg["algorithms"]:
                 alg_name = alg["name"]
                 queue_orders = alg.get("queue_orders", ["fcfs"])
 
@@ -144,7 +123,7 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, 
                 if alg_name == "easy_bf":
                     variants = [None]
                 else:
-                    opts = alg.get("variant_options", {"smoothing_factor": [0.3]})
+                    opts = alg["variant_options"]
                     keys = list(opts.keys())
                     combos = list(product(*[opts[k] for k in keys]))
                     variants = [json.dumps(dict(zip(keys, combo))) for combo in combos]
@@ -543,16 +522,15 @@ def main():
         description="Run Batsim/Batsched experiments.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Without --config the full 72-experiment factorial design is used.\n"
-            "See configs/ for example configuration files."
+            "See configs/ for available configuration files."
         ),
     )
     parser.add_argument(
         "--config",
         type=Path,
-        default=None,
+        required=True,
         metavar="FILE",
-        help="Path to a JSON experiment config file (default: full factorial design)",
+        help="Path to a JSON experiment config file",
     )
     parser.add_argument(
         "--output-dir",
@@ -578,13 +556,11 @@ def main():
     args = parser.parse_args()
 
     # Load experiment config
-    experiment_config = None
-    if args.config is not None:
-        if not args.config.exists():
-            print(f"ERROR: Config file not found: {args.config}", file=sys.stderr)
-            sys.exit(1)
-        with open(args.config) as f:
-            experiment_config = json.load(f)
+    if not args.config.exists():
+        print(f"ERROR: Config file not found: {args.config}", file=sys.stderr)
+        sys.exit(1)
+    with open(args.config) as f:
+        experiment_config = json.load(f)
 
     # Setup
     base_dir = Path(__file__).parent.resolve()
@@ -598,7 +574,7 @@ def main():
             run_name = args.run_name
         else:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            suffix = f"_{args.config.stem}" if args.config else "_full"
+            suffix = f"_{args.config.stem}"
             run_name = ts + suffix
         results_dir = runs_dir / run_name
 
@@ -610,10 +586,7 @@ def main():
         print(f"Runs directory: {results_dir.parent}")
         print(f"Run name:       {results_dir.name}")
     print(f"Results directory: {results_dir}")
-    if args.config:
-        print(f"Config file: {args.config.resolve()}")
-    else:
-        print("Config file: (default full factorial design)")
+    print(f"Config file: {args.config.resolve()}")
 
     # Check and prepare results directory
     action = check_results_directory(results_dir)
