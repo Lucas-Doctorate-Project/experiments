@@ -1,0 +1,24 @@
+platform = "platform/mustang_platform.xml"
+
+[workloads]
+small = "workloads/small.json"
+large = "workloads/large.json"
+mixed = "workloads/mixed.json"
+
+[energy_traces]
+clean_energy = "energy-data/traces/clean_energy_trace.csv"
+fossil_heavy = "energy-data/traces/fossil_heavy_trace.csv"
+mixed = "energy-data/traces/mixed_trace.csv"
+
+[run]
+workloads = ["small", "large", "mixed"]
+energy_scenarios = ["clean_energy", "fossil_heavy", "mixed"]
+
+[[run.algorithms]]
+name = "easy_bf"
+queue_orders = ["fcfs"]
+
+[[run.algorithms]]
+name = "greenfilling"
+queue_orders = ["fcfs"]
+variant_options = {carbon_min = [50.0], carbon_max = [700.0], water_min = [0.1], water_max = [5.0], green_floor = [0.1]}

@@ -9,6 +9,7 @@ This script automates running experiments that test different combinations of:
 
 import argparse
 import json
+import tomllib
 import subprocess
 import time
 import csv
@@ -52,46 +53,35 @@ class ExperimentResult:
     error_message: Optional[str] = None
 
 
-WORKLOAD_PATHS = {
-    "small": "workloads/small.json",
-    "large": "workloads/large.json",
-    "mixed": "workloads/mixed.json",
-}
-
-ENERGY_PATHS = {
-    "clean_energy": "energy-data/clean_energy_trace.csv",
-    "fossil_heavy": "energy-data/fossil_heavy_trace.csv",
-    "mixed": "energy-data/mixed_trace.csv",
-}
-
-PLATFORM_PATH = "platform/mustang_platform.xml"
 
 def generate_experiment_configs(base_dir: Path, experiment_config: dict, results_dir: Path = None) -> List[ExperimentConfig]:
     """
     Generate experiment configurations from a config dict.
 
-    The config dict has the form::
+    Config schema::
 
-        {
-            "workloads": ["small", "large", "mixed"],
-            "energy_scenarios": ["clean_energy", "fossil_heavy", "mixed"],
-            "algorithms": [
-                {"name": "easy_bf", "queue_orders": ["fcfs"]},
-                {
-                    "name": "greenfilling",
-                    "queue_orders": ["fcfs"],
-                    "variant_options": {"carbon_min": [50.0], "carbon_max": [700.0], "water_min": [0.1], "water_max": [5.0], "green_floor": [0.1]}
-                }
-            ]
-        }
+        platform = "platform/mustang_platform.xml"
 
-    Each entry in ``algorithms`` generates one experiment per
-    (workload × energy_scenario × queue_order × Cartesian-product-of-variant_options).
-    ``easy_bf`` has no ``variant_options`` key (it ignores energy entirely).
+        [workloads]
+        small = "workloads/small.json"
+
+        [energy_traces]
+        clean_energy = "energy-data/traces/clean_energy_trace.csv"
+
+        [run]
+        workloads = ["small"]
+        energy_scenarios = ["clean_energy"]
+
+        [[run.algorithms]]
+        name = "easy_bf"
+        queue_orders = ["fcfs"]
+
+    Each algorithm entry generates one experiment per
+    (workload x energy_scenario x queue_order x Cartesian-product-of-variant_options).
 
     Args:
         base_dir: Base directory containing workloads, platforms, and energy traces
-        experiment_config: Config dict
+        experiment_config: Parsed config dict
 
     Returns:
         List of ExperimentConfig objects
@@ -100,13 +90,18 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict, results
     if results_dir is None:
         results_dir = base_dir / "results"
 
+    workload_path_map = cfg["workloads"]
+    energy_path_map = cfg["energy_traces"]
+    platform = cfg["platform"]
+    run = cfg["run"]
+
     workloads = [
-        (name, WORKLOAD_PATHS[name])
-        for name in cfg.get("workloads", list(WORKLOAD_PATHS))
+        (name, workload_path_map[name])
+        for name in run.get("workloads", list(workload_path_map))
     ]
     energy_scenarios = [
-        (name, ENERGY_PATHS[name])
-        for name in cfg.get("energy_scenarios", list(ENERGY_PATHS))
+        (name, energy_path_map[name])
+        for name in run.get("energy_scenarios", list(energy_path_map))
     ]
 
     configs = []
@@ -114,7 +109,7 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict, results
 
     for workload_name, workload_path in workloads:
         for energy_trace_name, energy_trace_path in energy_scenarios:
-            for alg in cfg["algorithms"]:
+            for alg in run["algorithms"]:
                 alg_name = alg["name"]
                 queue_orders = alg.get("queue_orders", ["fcfs"])
 
@@ -134,7 +129,7 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict, results
                             exp_id=exp_id,
                             workload_name=workload_name,
                             workload_path=str(base_dir / workload_path),
-                            platform_path=str(base_dir / PLATFORM_PATH),
+                            platform_path=str(base_dir / platform),
                             energy_trace_name=energy_trace_name,
                             energy_trace_path=str(base_dir / energy_trace_path),
                             algorithm=alg_name,
@@ -559,8 +554,8 @@ def main():
     if not args.config.exists():
         print(f"ERROR: Config file not found: {args.config}", file=sys.stderr)
         sys.exit(1)
-    with open(args.config) as f:
-        experiment_config = json.load(f)
+    with open(args.config, "rb") as f:
+        experiment_config = tomllib.load(f)
 
     # Setup
     base_dir = Path(__file__).parent.resolve()
