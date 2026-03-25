@@ -1,0 +1,17 @@
+fetch = false
+export = true
+
+year = 2026
+week = 2
+
+[[extracts]]
+name = "clean_energy"
+country = "FR"
+
+[[extracts]]
+name = "fossil_heavy"
+country = "PL"
+
+[[extracts]]
+name = "mixed"
+country = "DE"

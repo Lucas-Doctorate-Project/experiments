@@ -52,7 +52,8 @@
     "geothermal-binary-hybrid": 1.745,
     "hydro": 17.0,
     "solar-pv": 0.004,
-    "wind": 0
+    "wind": 0,
+    "other": 0
   },
   "carbon": {
     "coal-default-ipcc-2014": 820,
@@ -105,6 +106,7 @@
     "wind-offshore-steel-unece-2020": 13,
     "nuclear-ipcc-2014": 12,
     "nuclear-unece-2020": 5.1,
-    "ocean-tidal-wave-ipcc-2014": 17
+    "ocean-tidal-wave-ipcc-2014": 17,
+    "other": 0
   }
 }
