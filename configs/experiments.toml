@@ -1,24 +1,134 @@
+[[experiments]]
 platform = "platform/mustang_platform.xml"
+workload = "workloads/small.json"
+energy_trace = "energy-data/traces/clean_energy_trace.csv"
+algorithm = "easy_bf"
+queue_order = "fcfs"
 
-[workloads]
-small = "workloads/small.json"
-large = "workloads/large.json"
-mixed = "workloads/mixed.json"
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/small.json"
+energy_trace = "energy-data/traces/clean_energy_trace.csv"
+algorithm = "greenfilling"
+queue_order = "fcfs"
+variant_options = {green_floor = 0.1}
 
-[energy_traces]
-clean_energy = "energy-data/traces/clean_energy_trace.csv"
-fossil_heavy = "energy-data/traces/fossil_heavy_trace.csv"
-mixed = "energy-data/traces/mixed_trace.csv"
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/small.json"
+energy_trace = "energy-data/traces/fossil_heavy_trace.csv"
+algorithm = "easy_bf"
+queue_order = "fcfs"
 
-[run]
-workloads = ["small", "large", "mixed"]
-energy_scenarios = ["clean_energy", "fossil_heavy", "mixed"]
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/small.json"
+energy_trace = "energy-data/traces/fossil_heavy_trace.csv"
+algorithm = "greenfilling"
+queue_order = "fcfs"
+variant_options = {green_floor = 0.1}
 
-[[run.algorithms]]
-name = "easy_bf"
-queue_orders = ["fcfs"]
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/small.json"
+energy_trace = "energy-data/traces/mixed_trace.csv"
+algorithm = "easy_bf"
+queue_order = "fcfs"
 
-[[run.algorithms]]
-name = "greenfilling"
-queue_orders = ["fcfs"]
-variant_options = {carbon_min = [50.0], carbon_max = [700.0], water_min = [0.1], water_max = [5.0], green_floor = [0.1]}
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/small.json"
+energy_trace = "energy-data/traces/mixed_trace.csv"
+algorithm = "greenfilling"
+queue_order = "fcfs"
+variant_options = {green_floor = 0.1}
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/large.json"
+energy_trace = "energy-data/traces/clean_energy_trace.csv"
+algorithm = "easy_bf"
+queue_order = "fcfs"
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/large.json"
+energy_trace = "energy-data/traces/clean_energy_trace.csv"
+algorithm = "greenfilling"
+queue_order = "fcfs"
+variant_options = {green_floor = 0.1}
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/large.json"
+energy_trace = "energy-data/traces/fossil_heavy_trace.csv"
+algorithm = "easy_bf"
+queue_order = "fcfs"
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/large.json"
+energy_trace = "energy-data/traces/fossil_heavy_trace.csv"
+algorithm = "greenfilling"
+queue_order = "fcfs"
+variant_options = {green_floor = 0.1}
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/large.json"
+energy_trace = "energy-data/traces/mixed_trace.csv"
+algorithm = "easy_bf"
+queue_order = "fcfs"
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/large.json"
+energy_trace = "energy-data/traces/mixed_trace.csv"
+algorithm = "greenfilling"
+queue_order = "fcfs"
+variant_options = {green_floor = 0.1}
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/mixed.json"
+energy_trace = "energy-data/traces/clean_energy_trace.csv"
+algorithm = "easy_bf"
+queue_order = "fcfs"
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/mixed.json"
+energy_trace = "energy-data/traces/clean_energy_trace.csv"
+algorithm = "greenfilling"
+queue_order = "fcfs"
+variant_options = {green_floor = 0.1}
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/mixed.json"
+energy_trace = "energy-data/traces/fossil_heavy_trace.csv"
+algorithm = "easy_bf"
+queue_order = "fcfs"
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/mixed.json"
+energy_trace = "energy-data/traces/fossil_heavy_trace.csv"
+algorithm = "greenfilling"
+queue_order = "fcfs"
+variant_options = {green_floor = 0.1}
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/mixed.json"
+energy_trace = "energy-data/traces/mixed_trace.csv"
+algorithm = "easy_bf"
+queue_order = "fcfs"
+
+[[experiments]]
+platform = "platform/mustang_platform.xml"
+workload = "workloads/mixed.json"
+energy_trace = "energy-data/traces/mixed_trace.csv"
+algorithm = "greenfilling"
+queue_order = "fcfs"
+variant_options = {green_floor = 0.1}

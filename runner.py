@@ -17,7 +17,6 @@ import shutil
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from itertools import product
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime
@@ -54,30 +53,49 @@ class ExperimentResult:
 
 
 
+def compute_trace_bounds(trace_path: str) -> dict:
+    """Compute carbon and water intensity min/max from an energy trace CSV."""
+    carbon_values = []
+    water_values = []
+    with open(trace_path, newline="") as f:
+        for row in csv.DictReader(f):
+            val = float(row["new_value"].split(":")[1])
+            if row["property_name"] == "carbon_intensity":
+                carbon_values.append(val)
+            elif row["property_name"] == "water_intensity":
+                water_values.append(val)
+    return {
+        "carbon_min": min(carbon_values),
+        "carbon_max": max(carbon_values),
+        "water_min": min(water_values),
+        "water_max": max(water_values),
+    }
+
+
 def generate_experiment_configs(base_dir: Path, experiment_config: dict, results_dir: Path = None) -> List[ExperimentConfig]:
     """
     Generate experiment configurations from a config dict.
 
     Config schema::
 
+        [[experiments]]
         platform = "platform/mustang_platform.xml"
+        workload = "workloads/small.json"
+        energy_trace = "energy-data/traces/clean_energy_trace.csv"
+        algorithm = "easy_bf"
+        queue_order = "fcfs"
 
-        [workloads]
-        small = "workloads/small.json"
+        [[experiments]]
+        platform = "platform/mustang_platform.xml"
+        workload = "workloads/small.json"
+        energy_trace = "energy-data/traces/clean_energy_trace.csv"
+        algorithm = "greenfilling"
+        queue_order = "fcfs"
+        variant_options = {green_floor = 0.1}
 
-        [energy_traces]
-        clean_energy = "energy-data/traces/clean_energy_trace.csv"
-
-        [run]
-        workloads = ["small"]
-        energy_scenarios = ["clean_energy"]
-
-        [[run.algorithms]]
-        name = "easy_bf"
-        queue_orders = ["fcfs"]
-
-    Each algorithm entry generates one experiment per
-    (workload x energy_scenario x queue_order x Cartesian-product-of-variant_options).
+    Each entry defines one experiment. For greenfilling, oracle bounds
+    (carbon_min/max, water_min/max) are computed from the trace and merged
+    into variant_options automatically.
 
     Args:
         base_dir: Base directory containing workloads, platforms, and energy traces
@@ -86,60 +104,40 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict, results
     Returns:
         List of ExperimentConfig objects
     """
-    cfg = experiment_config
     if results_dir is None:
         results_dir = base_dir / "results"
 
-    workload_path_map = cfg["workloads"]
-    energy_path_map = cfg["energy_traces"]
-    platform = cfg["platform"]
-    run = cfg["run"]
-
-    workloads = [
-        (name, workload_path_map[name])
-        for name in run.get("workloads", list(workload_path_map))
-    ]
-    energy_scenarios = [
-        (name, energy_path_map[name])
-        for name in run.get("energy_scenarios", list(energy_path_map))
-    ]
-
     configs = []
-    exp_id = 1
+    for exp_id, entry in enumerate(experiment_config["experiments"], start=1):
+        platform_path = str(base_dir / entry["platform"])
+        workload_path = str(base_dir / entry["workload"])
+        energy_trace_path = str(base_dir / entry["energy_trace"])
+        algorithm = entry["algorithm"]
+        queue_order = entry.get("queue_order", "fcfs")
 
-    for workload_name, workload_path in workloads:
-        for energy_trace_name, energy_trace_path in energy_scenarios:
-            for alg in run["algorithms"]:
-                alg_name = alg["name"]
-                queue_orders = alg.get("queue_orders", ["fcfs"])
+        workload_name = Path(workload_path).stem
+        energy_trace_name = Path(energy_trace_path).stem
 
-                # Build the list of variant_options strings for this algorithm.
-                # easy_bf has no variant_options; others default to alpha=0.3.
-                if alg_name == "easy_bf":
-                    variants = [None]
-                else:
-                    opts = alg["variant_options"]
-                    keys = list(opts.keys())
-                    combos = list(product(*[opts[k] for k in keys]))
-                    variants = [json.dumps(dict(zip(keys, combo))) for combo in combos]
+        if algorithm == "easy_bf":
+            variant_options = None
+        else:
+            opts = entry.get("variant_options", {})
+            bounds = compute_trace_bounds(energy_trace_path)
+            variant_options = json.dumps({**opts, **bounds})
 
-                for queue_order in queue_orders:
-                    for variant_options in variants:
-                        config = ExperimentConfig(
-                            exp_id=exp_id,
-                            workload_name=workload_name,
-                            workload_path=str(base_dir / workload_path),
-                            platform_path=str(base_dir / platform),
-                            energy_trace_name=energy_trace_name,
-                            energy_trace_path=str(base_dir / energy_trace_path),
-                            algorithm=alg_name,
-                            queue_order=queue_order,
-                            variant_options=variant_options,
-                            output_dir=str(results_dir / f"experiment_{exp_id:03d}"),
-                            port=28000 + exp_id,
-                        )
-                        configs.append(config)
-                        exp_id += 1
+        configs.append(ExperimentConfig(
+            exp_id=exp_id,
+            workload_name=workload_name,
+            workload_path=workload_path,
+            platform_path=platform_path,
+            energy_trace_name=energy_trace_name,
+            energy_trace_path=energy_trace_path,
+            algorithm=algorithm,
+            queue_order=queue_order,
+            variant_options=variant_options,
+            output_dir=str(results_dir / f"experiment_{exp_id:03d}"),
+            port=28000 + exp_id,
+        ))
 
     return configs
 
