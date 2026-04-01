@@ -91,7 +91,7 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict, results
         energy_trace = "energy-data/traces/clean_energy_trace.csv"
         algorithm = "greenfilling"
         queue_order = "fcfs"
-        variant_options = {green_floor = 0.1}
+        variant_options = {tau = 0.1}
 
     Each entry defines one experiment. For greenfilling, oracle bounds
     (carbon_min/max, water_min/max) are computed from the trace and merged

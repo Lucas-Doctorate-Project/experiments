@@ -11,7 +11,7 @@ workload = "workloads/small.json"
 energy_trace = "energy-data/traces/clean_energy_trace.csv"
 algorithm = "greenfilling"
 queue_order = "fcfs"
-variant_options = {green_floor = 0.1}
+variant_options = {tau = 0.1}
 
 [[experiments]]
 platform = "platform/mustang_platform.xml"
@@ -26,7 +26,7 @@ workload = "workloads/small.json"
 energy_trace = "energy-data/traces/fossil_heavy_trace.csv"
 algorithm = "greenfilling"
 queue_order = "fcfs"
-variant_options = {green_floor = 0.1}
+variant_options = {tau = 0.1}
 
 [[experiments]]
 platform = "platform/mustang_platform.xml"
@@ -41,7 +41,7 @@ workload = "workloads/small.json"
 energy_trace = "energy-data/traces/mixed_trace.csv"
 algorithm = "greenfilling"
 queue_order = "fcfs"
-variant_options = {green_floor = 0.1}
+variant_options = {tau = 0.1}
 
 [[experiments]]
 platform = "platform/mustang_platform.xml"
@@ -56,7 +56,7 @@ workload = "workloads/large.json"
 energy_trace = "energy-data/traces/clean_energy_trace.csv"
 algorithm = "greenfilling"
 queue_order = "fcfs"
-variant_options = {green_floor = 0.1}
+variant_options = {tau = 0.1}
 
 [[experiments]]
 platform = "platform/mustang_platform.xml"
@@ -71,7 +71,7 @@ workload = "workloads/large.json"
 energy_trace = "energy-data/traces/fossil_heavy_trace.csv"
 algorithm = "greenfilling"
 queue_order = "fcfs"
-variant_options = {green_floor = 0.1}
+variant_options = {tau = 0.1}
 
 [[experiments]]
 platform = "platform/mustang_platform.xml"
@@ -86,7 +86,7 @@ workload = "workloads/large.json"
 energy_trace = "energy-data/traces/mixed_trace.csv"
 algorithm = "greenfilling"
 queue_order = "fcfs"
-variant_options = {green_floor = 0.1}
+variant_options = {tau = 0.1}
 
 [[experiments]]
 platform = "platform/mustang_platform.xml"
@@ -101,7 +101,7 @@ workload = "workloads/mixed.json"
 energy_trace = "energy-data/traces/clean_energy_trace.csv"
 algorithm = "greenfilling"
 queue_order = "fcfs"
-variant_options = {green_floor = 0.1}
+variant_options = {tau = 0.1}
 
 [[experiments]]
 platform = "platform/mustang_platform.xml"
@@ -116,7 +116,7 @@ workload = "workloads/mixed.json"
 energy_trace = "energy-data/traces/fossil_heavy_trace.csv"
 algorithm = "greenfilling"
 queue_order = "fcfs"
-variant_options = {green_floor = 0.1}
+variant_options = {tau = 0.1}
 
 [[experiments]]
 platform = "platform/mustang_platform.xml"
@@ -131,4 +131,4 @@ workload = "workloads/mixed.json"
 energy_trace = "energy-data/traces/mixed_trace.csv"
 algorithm = "greenfilling"
 queue_order = "fcfs"
-variant_options = {green_floor = 0.1}
+variant_options = {tau = 0.1}

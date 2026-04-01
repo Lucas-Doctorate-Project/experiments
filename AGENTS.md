@@ -17,13 +17,13 @@ where intensities are normalized as:
 
 $$I' = \text{clamp}!\left(\frac{I - I_{\min}}{I_{\max} - I_{\min}},\ 0,\ 1\right)$$
 
-Instead of an on/off gate, it continuously scales the number of backfill-eligible machines inversely with environmental intensity. At peak intensity, capacity is reduced but never fully cut off thanks to `green_floor` ($\tau$, default 0.1). This avoids the dam effect of the binary gate, where jobs accumulated during dirty windows and flooded the scheduler when intensity dropped.
+Instead of an on/off gate, it continuously scales the number of backfill-eligible machines inversely with environmental intensity. At peak intensity, capacity is reduced but never fully cut off thanks to `tau$, default 0.1). This avoids the dam effect of the binary gate, where jobs accumulated during dirty windows and flooded the scheduler when intensity dropped.
 
 Features needed to run it:
 
 - `carbon_min` / `carbon_max`: full-trace min/max for carbon intensity (oracle knowledge)
 - `water_min` / `water_max`: full-trace min/max for water intensity (oracle knowledge)
-- `green_floor` ($\tau$): minimum fraction of machines always available for backfilling
+- `tau` ($\tau$): minimum fraction of machines always available for backfilling
 
 These options are passed as `variant_options` in the config file and forwarded to Batsched via `--variant_options`. The min/max bounds must come from the actual trace, which is what makes this version "oracle-based": it requires knowing the full intensity range in advance rather than computing it online.
 
@@ -78,7 +78,7 @@ workload = "workloads/small.json"
 energy_trace = "energy-data/traces/clean_energy_trace.csv"
 algorithm = "greenfilling"
 queue_order = "fcfs"
-variant_options = {green_floor = 0.1}
+variant_options = {tau = 0.1}
 ```
 
 - `easy_bf` entries have no `variant_options`.
