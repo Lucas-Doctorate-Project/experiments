@@ -1,9 +1,12 @@
-venv/*
+.venv/
+venv/
 .python-version
 __pycache__/
-outputs/
 .DS_Store
+.envrc
+
 workloads/mustang_release_v1.0beta.csv
 workloads/mustang_release_v1.0beta.csv.gz
 plots/
 energy-data/entsoe-data/
+outputs/
