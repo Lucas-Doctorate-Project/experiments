@@ -1,6 +1,6 @@
 {
   "workloads": ["small", "large", "mixed"],
-  "energy_scenarios": ["clean_energy", "mixed", "fossil_heavy"],
+  "energy_scenarios": ["fossil_heavy"],
   "algorithms": [
     {
       "name": "easy_bf",
@@ -9,7 +9,7 @@
     {
       "name": "greenfilling",
       "queue_orders": ["fcfs"],
-      "variant_options": {"smoothing_factor": [0.3, 0.5, 0.8]}
+      "variant_options": {"typical_intensities_file": ["pl_winter"],"smoothing_factor": [0.3], "greenfilling_debug": [true]}
     }
   ]
 }

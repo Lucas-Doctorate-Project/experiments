@@ -64,6 +64,21 @@ ENERGY_PATHS = {
     "mixed": "energy-data/mixed_trace.csv",
 }
 
+TYPICAL_INTENSITIES_PATH = {
+    "de_autumn": "typical_intensities/DE_autumn.csv",
+    "de_spring": "typical_intensities/DE_spring.csv",
+    "de_summer": "typical_intensities/DE_summer.csv",
+    "de_winter": "typical_intensities/DE_winter.csv",
+    "fr_autumn": "typical_intensities/FR_autumn.csv",
+    "fr_spring": "typical_intensities/FR_spring.csv",
+    "fr_summer": "typical_intensities/FR_summer.csv",
+    "fr_winter": "typical_intensities/FR_winter.csv",
+    "pl_autumn": "typical_intensities/PL_autumn.csv",
+    "pl_spring": "typical_intensities/PL_spring.csv",
+    "pl_summer": "typical_intensities/PL_summer.csv",
+    "pl_winter": "typical_intensities/PL_winter.csv",
+}
+
 PLATFORM_PATH = "platform/mustang_platform.xml"
 
 # Default design — kept in sync with configs/full.json
@@ -144,7 +159,18 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, 
                 if alg_name == "easy_bf":
                     variants = [None]
                 else:
-                    opts = alg.get("variant_options", {"smoothing_factor": [0.3]})
+                    opts = alg.get("variant_options", {"smoothing_factor": [0.3], "typical_intensities_file": ["de_autumn"]})
+
+                    if "typical_intensities_file" not in opts:
+                        opts["typical_intensities_file"] = ["de_autumn"]
+
+                    for i, name in enumerate(opts["typical_intensities_file"]):
+                        if Path(name).is_absolute():
+                            continue
+                        if name not in TYPICAL_INTENSITIES_PATH.keys():
+                            raise ValueError(f"Invalid typical_intensities_file: {name}")
+                        opts["typical_intensities_file"][i] = str((base_dir / TYPICAL_INTENSITIES_PATH[name]).resolve())
+
                     keys = list(opts.keys())
                     combos = list(product(*[opts[k] for k in keys]))
                     variants = [json.dumps(dict(zip(keys, combo))) for combo in combos]

@@ -11,7 +11,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 BASE_DIR = Path(__file__).parent.resolve()
-RESULTS_DIR = BASE_DIR / "outputs" / "20260225_160755_alphas"
+RESULTS_DIR = BASE_DIR / "outputs" / "20260403_182349_alphas"
 
 # Columns to keep from batsim_output_schedule.csv
 SCHEDULE_COLS = [
@@ -63,7 +63,7 @@ GRID_COLOR_HINTS = [
     (("hydro", "renew", "clean", "low"), "#2ca02c"),   # green
     (("wind",), "#17becf"),                             # cyan
     (("solar",), "#ffbf00"),                            # amber
-    (("mixed", "medium"), "#1f77b4"),                   # blue
+    (("mixed", "medium"), "#1f77b4"),                       # blue
     (("fossil", "coal", "gas", "high", "dirty"), "#d62728"),  # red
 ]
 
