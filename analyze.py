@@ -6,12 +6,13 @@ environmental metrics (divided by makespan), then prints % change relative
 to the easy_bf baseline for each workload x energy_grid x alpha combination.
 """
 
+import json
 import pandas as pd
 from pathlib import Path
 import matplotlib.pyplot as plt
 
 BASE_DIR = Path(__file__).parent.resolve()
-RESULTS_DIR = BASE_DIR / "outputs" / "20260403_182349_alphas"
+RESULTS_DIR = BASE_DIR / "outputs" / "normalized_typical_intensities"
 
 # Columns to keep from batsim_output_schedule.csv
 SCHEDULE_COLS = [
@@ -85,6 +86,28 @@ def fmt(val):
         return f"{val:.2e}"
 
 
+def fmt_alpha(val):
+    """Format alpha for display, gracefully handling missing values."""
+    return "n/a" if pd.isna(val) else f"{val:g}"
+
+
+def extract_typical_intensities_file(variant_options):
+    """Extract typical intensities filename from variant options JSON."""
+    if pd.isna(variant_options) or not variant_options:
+        return None
+    try:
+        options = json.loads(variant_options)
+    except json.JSONDecodeError:
+        return None
+    path = options.get("typical_intensities_file")
+    if not path:
+        return None
+    try:
+        return Path(path).name
+    except TypeError:
+        return str(path)
+
+
 def build_summary() -> pd.DataFrame:
     manifest = pd.read_csv(RESULTS_DIR / "experiments.csv", usecols=MANIFEST_COLS)
 
@@ -97,6 +120,10 @@ def build_summary() -> pd.DataFrame:
         rows.append(row)
 
     df = pd.DataFrame(rows)
+
+    df["typical_intensities_file"] = df["variant_options"].apply(
+        extract_typical_intensities_file
+    )
 
     # Convert joules -> kWh for readability
     df["consumed_kwh"] = df["consumed_joules"] / 3_600_000
@@ -139,6 +166,10 @@ def build_percent_change_df(df: pd.DataFrame) -> pd.DataFrame:
 def plot_percent_changes(pct_df: pd.DataFrame) -> None:
     if pct_df.empty:
         print("No complete data for plotting.")
+        return
+
+    if "alpha" not in pct_df or pct_df["alpha"].dropna().empty:
+        print("No alpha values found; skipping plot.")
         return
 
     metrics = ["Mean slowdown", "Makespan", "Water", "Carbon"]
@@ -219,44 +250,237 @@ def plot_percent_changes(pct_df: pd.DataFrame) -> None:
     plt.show()
 
 
-def print_best_alpha_by_ratio(df: pd.DataFrame) -> None:
-    print(f"\n{'═'*70}")
-    print("  Best alpha by trade-off ratio: |makespan_diff| / (|water_diff| + |carbon_diff|)")
-    print(f"{'═'*70}")
-    print(f"  {'Scenario':<40}  {'Best α':>10}  {'Ratio':>12}")
-    print(f"  {'-'*40}  {'-'*10}  {'-'*12}")
+def build_pairwise_diff_df(df: pd.DataFrame) -> pd.DataFrame:
+    baseline_df = df[df["algorithm"] == "easy_bf"]
+    gf_df = df[df["algorithm"] == "greenfilling"].copy()
+
+    if baseline_df.empty or gf_df.empty:
+        return pd.DataFrame()
+
+    gf_df["typical_intensities_file"] = gf_df["typical_intensities_file"].fillna("n/a")
+    baseline_map = baseline_df.groupby(
+        ["workload", "energy_grid", "queue_order"]
+    ).first()
+
+    rows = []
+    for _, gf in gf_df.iterrows():
+        key = (gf["workload"], gf["energy_grid"], gf["queue_order"])
+        if key not in baseline_map.index:
+            continue
+
+        baseline = baseline_map.loc[key]
+        rows.append(
+            {
+                "easy_bf_id": int(baseline["id"]),
+                "greenfilling_id": int(gf["id"]),
+                "workload": gf["workload"],
+                "energy_grid": gf["energy_grid"],
+                "queue_order": gf["queue_order"],
+                "typical_intensities_file": gf["typical_intensities_file"],
+                "alpha": gf.get("alpha"),
+                "makespan_diff_pct": pct_change(gf["makespan"], baseline["makespan"]),
+                "carbon_diff_pct": pct_change(gf["carbon_kg"], baseline["carbon_kg"]),
+                "water_diff_pct": pct_change(
+                    gf["total_water_footprint"], baseline["total_water_footprint"]
+                ),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def plot_tradeoff_scatter(
+    diff_df: pd.DataFrame,
+    makespan_tolerance: float = 5.0,
+) -> None:
+    if diff_df.empty:
+        print("No pairwise comparisons available for plotting.")
+        return
+
+    diff_df = diff_df.copy().reset_index(drop=True)
+
+    energy_grids = sorted(diff_df["energy_grid"].dropna().unique().tolist())
+    palette = list(plt.get_cmap("tab10").colors)
+
+    fig, axes = plt.subplots(1, 3, figsize=(15.6, 4.8))
+    axis_defs = [
+        (axes[0], "makespan_diff_pct", "carbon_diff_pct"),
+        (axes[1], "makespan_diff_pct", "water_diff_pct"),
+        (axes[2], "carbon_diff_pct", "water_diff_pct"),
+    ]
+    scatter_map = {ax: [] for ax in axes}
+
+    for idx, grid in enumerate(energy_grids):
+        subset = diff_df[diff_df["energy_grid"] == grid]
+        if subset.empty:
+            continue
+        color = palette[idx % len(palette)]
+        indices = subset.index.to_numpy()
+        for ax, x_col, y_col in axis_defs:
+            sc = ax.scatter(
+                subset[x_col],
+                subset[y_col],
+                label=grid,
+                color=color,
+                alpha=0.75,
+                s=36,
+                picker=True,
+                pickradius=5,
+            )
+            scatter_map[ax].append((sc, indices, x_col, y_col))
+
+    for ax, x_col, y_col in axis_defs:
+        ax.axhline(0.0, color="gray", linestyle="--", linewidth=1.0)
+        ax.axvline(0.0, color="gray", linestyle="--", linewidth=1.0)
+        if "makespan" in x_col:
+            ax.axvline(
+                makespan_tolerance,
+                color="gray",
+                linestyle=":",
+                linewidth=1.0,
+            )
+            ax.axvline(
+                -makespan_tolerance,
+                color="gray",
+                linestyle=":",
+                linewidth=1.0,
+            )
+
+    highlight_points = []
+    for ax, x_col, y_col in axis_defs:
+        highlight = ax.scatter(
+            [],
+            [],
+            s=160,
+            facecolors="none",
+            edgecolors="black",
+            linewidth=1.2,
+            zorder=4,
+        )
+        highlight_points.append((highlight, x_col, y_col))
+
+    info_text = fig.text(
+        0.01,
+        0.98,
+        "Hover over a point to see details.",
+        ha="left",
+        va="top",
+    )
+
+    def update_highlight(row_idx: int) -> None:
+        row = diff_df.loc[row_idx]
+        info_text.set_text(
+            "easy_bf={easy_bf_id} | gf={greenfilling_id} | workload={workload} "
+            "| grid={energy_grid} | queue={queue_order} | typical={typical_intensities_file}".format(
+                **row
+            )
+        )
+        for highlight, x_col, y_col in highlight_points:
+            highlight.set_offsets([[row[x_col], row[y_col]]])
+        fig.canvas.draw_idle()
+
+    def clear_highlight() -> None:
+        info_text.set_text("Hover over a point to see details.")
+        for highlight, _, _ in highlight_points:
+            highlight.set_offsets([])
+        fig.canvas.draw_idle()
+
+    def on_move(event) -> None:
+        if event.inaxes is None:
+            clear_highlight()
+            return
+
+        ax = event.inaxes
+        for sc, indices, _, _ in scatter_map.get(ax, []):
+            contains, info = sc.contains(event)
+            if contains and info.get("ind"):
+                global_index = indices[info["ind"][0]]
+                update_highlight(int(global_index))
+                return
+        clear_highlight()
+
+    axes[0].set_title("Carbon vs makespan (diff %)")
+    axes[0].set_xlabel("Makespan diff (%)")
+    axes[0].set_ylabel("Carbon diff (%)")
+
+    axes[1].set_title("Water vs makespan (diff %)")
+    axes[1].set_xlabel("Makespan diff (%)")
+    axes[1].set_ylabel("Water diff (%)")
+
+    axes[2].set_title("Water vs carbon (diff %)")
+    axes[2].set_xlabel("Carbon diff (%)")
+    axes[2].set_ylabel("Water diff (%)")
+
+    fig.canvas.mpl_connect("motion_notify_event", on_move)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="upper center", ncol=4, frameon=False)
+
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
+    plt.show()
+
+
+def print_comparisons_by_typical_intensity(df: pd.DataFrame) -> None:
+    print_cols = (
+        list(RAW_METRICS.items()) +
+        [(col, label) for col, (_, label) in NORMALIZED_METRICS.items()]
+    )
+
+    baseline_df = df[df["algorithm"] == "easy_bf"]
+    gf_df = df[df["algorithm"] == "greenfilling"].copy()
+
+    if baseline_df.empty:
+        print("No easy_bf rows found for comparison.")
+        return
+    if gf_df.empty:
+        print("No greenfilling rows found for comparison.")
+        return
+
+    gf_df["typical_intensities_file"] = gf_df["typical_intensities_file"].fillna("n/a")
+    baseline_groups = baseline_df.groupby(["workload", "energy_grid", "queue_order"])
+    scenario_groups = gf_df.groupby(
+        ["workload", "energy_grid", "queue_order", "typical_intensities_file"]
+    )
 
     found_any = False
-
-    for (workload, energy_grid), grp in df.groupby(["workload", "energy_grid"]):
-        baseline_rows = grp[grp["algorithm"] == "easy_bf"]
-        gf_rows = grp[grp["algorithm"] == "greenfilling"].sort_values("alpha")
-        if baseline_rows.empty or gf_rows.empty:
+    for (workload, energy_grid, queue_order, tif), grp in scenario_groups:
+        key = (workload, energy_grid, queue_order)
+        if key not in baseline_groups.indices:
             continue
 
-        baseline = baseline_rows.iloc[0]
-        ratios = []
-        for _, gf in gf_rows.iterrows():
-            makespan_diff = pct_change(gf["makespan"], baseline["makespan"])
-            water_diff = pct_change(gf["total_water_footprint"], baseline["total_water_footprint"])
-            carbon_diff = pct_change(gf["carbon_kg"], baseline["carbon_kg"])
-            denominator = abs(water_diff) + abs(carbon_diff)
-            if denominator == 0:
-                continue
-            ratio = abs(makespan_diff) / denominator
-            ratios.append((gf["alpha"], ratio))
+        baseline = baseline_groups.get_group(key).iloc[0]
+        for _, gf in grp.iterrows():
+            found_any = True
+            header_parts = [
+                f"Workload: {workload}",
+                f"Grid: {energy_grid}",
+                f"Queue: {queue_order}",
+                f"Typical: {tif}",
+            ]
+            if not pd.isna(gf.get("alpha")):
+                header_parts.append(f"alpha: {fmt_alpha(gf['alpha'])}")
 
-        scenario = f"{workload} | {energy_grid}"
-        if not ratios:
-            print(f"  {scenario:<40}  {'n/a':>10}  {'n/a':>12}")
-            continue
+            print("\n" + "=" * 88)
+            print(" | ".join(header_parts))
+            print("=" * 88)
+            print(
+                f"IDs: easy_bf={int(baseline['id'])} | greenfilling={int(gf['id'])}"
+            )
 
-        found_any = True
-        best_alpha, best_ratio = min(ratios, key=lambda x: x[1])
-        print(f"  {scenario:<40}  {best_alpha:>10.3f}  {best_ratio:>12.4f}")
+            for col, label in print_cols:
+                base_val = baseline[col]
+                gf_val = gf[col]
+                delta = pct_change(gf_val, base_val)
+                print(
+                    f"  {label:<28} "
+                    f"easy_bf={fmt(base_val):>12}  "
+                    f"greenfilling={fmt(gf_val):>12}  "
+                    f"delta%={delta:+.1f}%"
+                )
 
     if not found_any:
-        print("  No complete scenarios with a valid ratio.")
+        print("No matching easy_bf baselines found for greenfilling runs.")
 
 
 def main():
@@ -273,67 +497,10 @@ def main():
         .astype(float)
     )
 
-    # ── Pretty print ──────────────────────────────────────────────────────────
-    print_cols = (
-        list(RAW_METRICS.items()) +
-        [(col, label) for col, (_, label) in NORMALIZED_METRICS.items()]
-    )
+    print_comparisons_by_typical_intensity(df)
 
-    for workload, workload_grp in df.groupby("workload"):
-        grid_entries = []
-        for energy_grid, grid_grp in workload_grp.groupby("energy_grid"):
-            baseline_rows = grid_grp[grid_grp["algorithm"] == "easy_bf"]
-            gf_rows = grid_grp[grid_grp["algorithm"] == "greenfilling"].sort_values("alpha")
-
-            if baseline_rows.empty or gf_rows.empty:
-                continue
-
-            grid_entries.append((energy_grid, baseline_rows.iloc[0], gf_rows))
-
-        if not grid_entries:
-            print(f"\n{'═'*70}")
-            print(f"  Workload: {workload}")
-            print(f"{'═'*70}")
-            print("  Skipping: no complete (easy_bf + greenfilling) grid data.")
-            continue
-
-        col_width = 22
-        print(f"\n{'═'*70}")
-        print(f"  Workload: {workload}")
-        print(f"{'═'*70}")
-
-        # Header: metric + per-grid columns
-        print(f"  {'Metric':<30}", end="")
-        for energy_grid, _, gf_rows in grid_entries:
-            print(f"  {f'{energy_grid} easy_bf':>{col_width}}", end="")
-            for _, gf in gf_rows.iterrows():
-                label = f"{energy_grid} α={gf['alpha']} (Δ%)"
-                print(f"  {label:>{col_width}}", end="")
-        print()
-
-        print(f"  {'-'*30}", end="")
-        for _, _, gf_rows in grid_entries:
-            print(f"  {'─'*col_width}", end="")
-            for _ in gf_rows.iterrows():
-                print(f"  {'─'*col_width}", end="")
-        print()
-
-        for col, label in print_cols:
-            print(f"  {label:<30}", end="")
-            for _, baseline, gf_rows in grid_entries:
-                base_val = baseline[col]
-                print(f"  {fmt(base_val):>{col_width}}", end="")
-                for _, gf in gf_rows.iterrows():
-                    delta = pct_change(gf[col], base_val)
-                    cell = f"{fmt(gf[col])} ({delta:+.1f}%)"
-                    print(f"  {cell:>{col_width}}", end="")
-            print()
-
-    print()
-    print_best_alpha_by_ratio(df)
-    print()
-    pct_df = build_percent_change_df(df)
-    plot_percent_changes(pct_df)
+    diff_df = build_pairwise_diff_df(df)
+    plot_tradeoff_scatter(diff_df)
 
 
 if __name__ == "__main__":
