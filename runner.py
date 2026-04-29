@@ -99,6 +99,57 @@ DEFAULT_CONFIG = {
 }
 
 
+def _parse_mapping(raw: str) -> dict:
+    parts = [p for p in raw.split(";") if p]
+    mapping = {}
+    for part in parts:
+        tech, value = part.split(":")
+        mapping[tech.strip()] = float(value)
+    return mapping
+
+
+def _trace_effective_intensity_bounds(trace_path: Path) -> dict:
+    """Compute min/max effective carbon and water intensities from a trace CSV."""
+    carbon_map = None
+    water_map = None
+    mix_rows = []
+
+    with open(trace_path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            prop = row.get("property_name")
+            value = row.get("new_value", "")
+            if prop == "carbon_intensity":
+                carbon_map = _parse_mapping(value)
+            elif prop == "water_intensity":
+                water_map = _parse_mapping(value)
+            elif prop == "energy_mix":
+                mix_rows.append(value)
+
+    if carbon_map is None or water_map is None:
+        raise ValueError(f"Missing intensity rows in trace: {trace_path}")
+    if not mix_rows:
+        raise ValueError(f"No energy mix rows in trace: {trace_path}")
+
+    def effective_intensity(mix_str: str, intensity_map: dict) -> float:
+        mix = _parse_mapping(mix_str)
+        total = 0.0
+        for tech, share in mix.items():
+            if tech in intensity_map:
+                total += (share / 100.0) * intensity_map[tech]
+        return total
+
+    carbon_vals = [effective_intensity(mix, carbon_map) for mix in mix_rows]
+    water_vals = [effective_intensity(mix, water_map) for mix in mix_rows]
+
+    return {
+        "min_effective_carbon_intensity": min(carbon_vals),
+        "max_effective_carbon_intensity": max(carbon_vals),
+        "min_effective_water_intensity": min(water_vals),
+        "max_effective_water_intensity": max(water_vals),
+    }
+
+
 def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, results_dir: Path = None) -> List[ExperimentConfig]:
     """
     Generate experiment configurations from a config dict.
@@ -145,6 +196,11 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, 
         for name in cfg.get("energy_scenarios", list(ENERGY_PATHS))
     ]
 
+    trace_bounds = {}
+    for _, energy_trace_path in energy_scenarios:
+        abs_path = (base_dir / energy_trace_path).resolve()
+        trace_bounds[str(abs_path)] = _trace_effective_intensity_bounds(abs_path)
+
     configs = []
     exp_id = 1
 
@@ -159,7 +215,15 @@ def generate_experiment_configs(base_dir: Path, experiment_config: dict = None, 
                 if alg_name == "easy_bf":
                     variants = [None]
                 else:
-                    opts = alg.get("variant_options", {"smoothing_factor": [0.3], "typical_intensities_file": ["de_autumn"]})
+                    raw_opts = alg.get("variant_options", {"smoothing_factor": [0.3], "typical_intensities_file": ["de_autumn"]})
+                    opts = {
+                        key: (list(value) if isinstance(value, list) else value)
+                        for key, value in raw_opts.items()
+                    }
+
+                    bounds = trace_bounds[str((base_dir / energy_trace_path).resolve())]
+                    for key, value in bounds.items():
+                        opts[key] = [value]
 
                     if "typical_intensities_file" not in opts:
                         opts["typical_intensities_file"] = ["de_autumn"]
