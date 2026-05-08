@@ -88,53 +88,65 @@ def get_data_from_region(region: str, source_by_code: dict[str, str]):
     return values_by_source
 
 
-def format_df_row_into_energy_mix_str(row) -> str:
-    items = [(source, val) for source, val in row.items() if source != 'timestamp']
-    if not items:
-        return ""
-    # Round all but the last source to 2 decimal places, then set the last one
-    # to 100 - sum(others) so the total is exactly 100.00. This avoids the
-    # per-value rounding error that causes the plugin's validation to reject
-    # mixes summing to 99.99% instead of 100%.
-    rounded = [round(val, 2) for _, val in items[:-1]]
-    rounded.append(round(100.0 - sum(rounded), 2))
-    return ";".join(f"{source}:{val:.2f}" for (source, _), val in zip(items, rounded))
+def calculate_grid_intensities(energy_values_by_source: dict) -> pd.DataFrame:
+    """
+    Calculates the weighted average grid intensities (Carbon and Water) 
+    at each time step based on the energy generation of each source.
+    """
+    energy_df = pd.DataFrame(energy_values_by_source)
+
+    # 1. Cleanup: Remove sources that generated zero energy during the entire period
+    energy_df = energy_df.loc[:, (energy_df.sum(axis=0) > 0)]
+    
+    # 2. Weights: Calculate the fraction (0.0 to 1.0) of each source in the grid at that instant
+    total_energy_by_instant = energy_df.sum(axis=1)
+    weights_df = energy_df.div(total_energy_by_instant, axis=0).fillna(0)
+    
+    # 3. Intensity Alignment: Fetch the exact intensities matching the active columns
+    c_intensities = [CARBON_INTENSITY.get(col, 0) for col in weights_df.columns]
+    w_intensities = [WATER_INTENSITY.get(col, 0) for col in weights_df.columns]
+
+    # 4. Math: Instantaneous weighted average (Fraction * Intensity)
+    # We create a new DataFrame just for the results to avoid shape mismatch issues
+    results_df = pd.DataFrame()
+    results_df['timestamp'] = (weights_df.index * 900).astype(int)
+    results_df['carbon_intensity'] = weights_df.dot(c_intensities).round(4)
+    results_df['water_intensity'] = weights_df.dot(w_intensities).round(4)
+    
+    return results_df
+
+
+def format_trace_for_batsim(intensities_df: pd.DataFrame, host_id: str = "AS0") -> pd.DataFrame:
+    """
+    Transforms the wide intensity DataFrame (columns) into the long format 
+    (events) required by the Batsim/SimGrid simulator.
+    """
+    # 1. Unpivot: Flatten the DataFrame (transforms intensity columns into event rows)
+    final_df = intensities_df.melt(
+        id_vars=['timestamp'], 
+        value_vars=['carbon_intensity', 'water_intensity'],
+        var_name='property_name', 
+        value_name='new_value'
+    )
+    
+    # 2. Add the Host ID
+    final_df['host_id'] = host_id
+
+    # 3. Final Formatting: Order columns and sort rows chronologically
+    final_df = final_df[['timestamp', 'host_id', 'property_name', 'new_value']]
+    final_df = final_df.sort_values(by=['timestamp', 'property_name']).reset_index(drop=True)
+    
+    return final_df
 
 def export_energy_data(energy_values_by_region: dict[str, dict[str, list[float]]]):
     for region, energy_values_by_source in energy_values_by_region.items():
-        energy_df = pd.DataFrame(energy_values_by_source)
-
-        # Cleaning sources with all values equal to 0
-        energy_df = energy_df.loc[:, (energy_df.sum(axis=0) > 0)]
+        # Step 1: Calculate the mathematical intensities
+        intensities_df = calculate_grid_intensities(energy_values_by_source)
         
-        # Calculating total of generated energy at each time point in region, and after that the source percentage.
-        total_energy_by_instant = energy_df.sum(axis=1)
-        percentage_df = energy_df.div(total_energy_by_instant, axis=0).fillna(0) * 100
+        # Step 2: Format to the simulator's standards
+        batsim_trace_df = format_trace_for_batsim(intensities_df, host_id="AS0")
 
-        # Adding timestamps (900s = 15min)
-        percentage_df['timestamp'] = [i * 900 for i in range(len(percentage_df))]
-
-        sources = [col for col in percentage_df.columns if col != 'timestamp']
-        carbon_str = ";".join(f"{s}:{CARBON_INTENSITY.get(s, 0)}" for s in sources)
-        water_str  = ";".join(f"{s}:{WATER_INTENSITY.get(s, 0)}" for s in sources)
-
-        rows = []
-        for _, row in percentage_df.iterrows():
-            rows.append({
-                "timestamp": int(row['timestamp']),
-                "host_id": "AS0",
-                "property_name": "energy_mix",
-                "new_value": format_df_row_into_energy_mix_str(row)
-            })
-
-        # Insert static intensity rows at t=0, after the first energy_mix row.
-        # Order matters: carbon/water intensities are only applied to sources that
-        # already exist in the mix, so energy_mix must be processed first.
-        rows.insert(1, {"timestamp": 0, "host_id": "AS0", "property_name": "water_intensity", "new_value": water_str})
-        rows.insert(1, {"timestamp": 0, "host_id": "AS0", "property_name": "carbon_intensity", "new_value": carbon_str})
-
-        final_df = pd.DataFrame(rows)
-        final_df.to_csv(f"{GRID_COMPOSITION_BY_REGION[region]}_trace.csv", index=False, quoting=csv.QUOTE_NONNUMERIC, quotechar='"')
+        batsim_trace_df.to_csv(f"{GRID_COMPOSITION_BY_REGION[region]}_trace.csv", index=False, quoting=csv.QUOTE_NONNUMERIC, quotechar='"')
 
 
 def main():
