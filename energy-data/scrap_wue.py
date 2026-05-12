@@ -27,7 +27,8 @@ def estimate_wue(wet_bulb_temp):
     else:
         return 0.2 + 0.005 * ((wet_bulb_temp - 10.0) ** 2)
 
-def fetch_historical_data(coordinates_by_region: dict[str, dict[str, float]], start_date: datetime, end_date: datetime):
+def fetch_historical_data(coordinates_by_region: dict[str, dict[str, float]], start_date: datetime, end_date: datetime, export_to_file: bool = False):
+    dataframe_by_region = {}
     for host_id, coordinates in coordinates_by_region.items():
         print(f"Fetching historical data for {host_id} (Lat: {coordinates['lat']}, Lon: {coordinates['lon']})...")
         
@@ -66,19 +67,23 @@ def fetch_historical_data(coordinates_by_region: dict[str, dict[str, float]], st
 
             # Reorganize columns for better readability
             df = df[["timestamp", "host_id", "property_name", "new_value"]]
+            dataframe_by_region[host_id] = df
             
-            filename = f"{host_id}_wue_trace.csv"
-            df.to_csv(filename, index=False)
+            if export_to_file:
+                filename = f"{host_id}_wue_trace.csv"
+                df.to_csv(filename, index=False)
             
             # Wait 1 second to avoid overloading the free public API
             time.sleep(1)
             
         except requests.exceptions.RequestException as e:
             print(f"Error fetching data for {host_id}. Details: {e}")
+        
+    return dataframe_by_region
 
 
 def main():
-    fetch_historical_data(COORDINATES_BY_REGION, start_date, end_date)
+    _ = fetch_historical_data(COORDINATES_BY_REGION, start_date, end_date, export_to_file=True)
 
 if __name__ == "__main__":
     main()

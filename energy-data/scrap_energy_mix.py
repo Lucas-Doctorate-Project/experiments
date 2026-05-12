@@ -138,6 +138,20 @@ def format_trace_for_batsim(intensities_df: pd.DataFrame, host_id: str = "AS0") 
     
     return final_df
 
+
+def get_energy_dataframes(energy_values_by_region: dict[str, dict[str, list[float]]]) -> dict:
+    energy_dfs = {}
+    for region, energy_values_by_source in energy_values_by_region.items():
+        intensities_df = calculate_grid_intensities(energy_values_by_source)
+        
+        batsim_trace_df = format_trace_for_batsim(intensities_df, host_id="AS0")
+
+        region_name = GRID_COMPOSITION_BY_REGION[region]
+        energy_dfs[region_name] = batsim_trace_df
+        
+    return energy_dfs
+
+
 def export_energy_data(energy_values_by_region: dict[str, dict[str, list[float]]]):
     for region, energy_values_by_source in energy_values_by_region.items():
         # Step 1: Calculate the mathematical intensities
